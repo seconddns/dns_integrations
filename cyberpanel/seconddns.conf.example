@@ -1,0 +1,9 @@
+[seconddns]
+# Secondary DNS service URL
+api_url = https://seconddns.com
+
+# API key from your dashboard (Dashboard → API Key)
+api_key = YOUR_API_KEY_HERE
+
+# Primary DNS server IP (leave empty to auto-detect)
+master_ip =
