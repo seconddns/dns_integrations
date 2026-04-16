@@ -1,0 +1,119 @@
+zabbix_export:
+  version: "6.0"
+  template_groups:
+    - uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates/Applications
+
+  templates:
+    - uuid: a1b2c3d4e5f60000000000000000dns1
+      template: SecondDNS Health
+      name: SecondDNS Zone Health Monitor
+      description: |
+        Monitors DNS zone health via the SecondDNS API.
+        Requires macros: {$SECONDDNS_API_URL}, {$SECONDDNS_API_KEY}.
+      groups:
+        - name: Templates/Applications
+
+      macros:
+        - macro: "{$SECONDDNS_API_URL}"
+          value: "https://seconddns.com"
+          description: SecondDNS API base URL
+        - macro: "{$SECONDDNS_API_KEY}"
+          value: ""
+          type: SECRET_TEXT
+          description: X-API-Key for authentication
+
+      items:
+        - uuid: a1b2c3d4e5f60000000000000000itm1
+          name: "SecondDNS: Zone health JSON"
+          type: HTTP_AGENT
+          key: seconddns.health.json
+          url: "{$SECONDDNS_API_URL}/api/health/zones"
+          headers:
+            - name: X-API-Key
+              value: "{$SECONDDNS_API_KEY}"
+          value_type: TEXT
+          delay: 5m
+          history: 7d
+          description: Raw JSON response from the health API
+
+        - uuid: a1b2c3d4e5f60000000000000000itm2
+          name: "SecondDNS: Total zones"
+          type: DEPENDENT
+          key: seconddns.zones.total
+          masteritem:
+            key: seconddns.health.json
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.summary.total"
+          value_type: UNSIGNED
+          description: Total number of active zones
+
+        - uuid: a1b2c3d4e5f60000000000000000itm3
+          name: "SecondDNS: Synced zones"
+          type: DEPENDENT
+          key: seconddns.zones.synced
+          masteritem:
+            key: seconddns.health.json
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.summary.synced"
+          value_type: UNSIGNED
+
+        - uuid: a1b2c3d4e5f60000000000000000itm4
+          name: "SecondDNS: Stale zones"
+          type: DEPENDENT
+          key: seconddns.zones.stale
+          masteritem:
+            key: seconddns.health.json
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.summary.stale"
+          value_type: UNSIGNED
+
+        - uuid: a1b2c3d4e5f60000000000000000itm5
+          name: "SecondDNS: Master unreachable zones"
+          type: DEPENDENT
+          key: seconddns.zones.master_unreachable
+          masteritem:
+            key: seconddns.health.json
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.summary.masterUnreachable"
+          value_type: UNSIGNED
+
+        - uuid: a1b2c3d4e5f60000000000000000itm6
+          name: "SecondDNS: Nagios output"
+          type: HTTP_AGENT
+          key: seconddns.health.nagios
+          url: "{$SECONDDNS_API_URL}/api/health/zones?format=nagios"
+          headers:
+            - name: X-API-Key
+              value: "{$SECONDDNS_API_KEY}"
+          value_type: TEXT
+          delay: 5m
+          history: 7d
+          description: Nagios-compatible plain text output (problems only)
+
+      triggers:
+        - uuid: a1b2c3d4e5f60000000000000000trg1
+          expression: "last(/SecondDNS Health/seconddns.zones.stale)>0"
+          name: "SecondDNS: {ITEM.LASTVALUE} zone(s) stale"
+          priority: WARNING
+          description: One or more zones have stale serials compared to master.
+
+        - uuid: a1b2c3d4e5f60000000000000000trg2
+          expression: "last(/SecondDNS Health/seconddns.zones.master_unreachable)>0"
+          name: "SecondDNS: {ITEM.LASTVALUE} zone(s) master unreachable"
+          priority: HIGH
+          description: Cannot reach the master DNS server for one or more zones.
+
+        - uuid: a1b2c3d4e5f60000000000000000trg3
+          expression: "nodata(/SecondDNS Health/seconddns.health.json,1800)=1"
+          name: "SecondDNS: Health API not responding for 30 minutes"
+          priority: HIGH
+          description: No data received from the SecondDNS health API in 30 minutes.
