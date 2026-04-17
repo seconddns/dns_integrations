@@ -2,15 +2,20 @@
 # Nagios/Icinga check plugin for SecondDNS zone health.
 #
 # Queries the SecondDNS health API and returns Nagios-compatible output.
-# Checks ALL zones by default; pass a zone name to check a single zone.
 #
 # Usage:
-#   check_seconddns.sh                          # all zones
-#   check_seconddns.sh example.com              # single zone
+#   check_seconddns.sh -k <API_KEY> [-u <URL>] [-t <TIMEOUT>] [-z <ZONE>]
 #
-# Environment variables (or edit the defaults below):
-#   SECONDDNS_API_URL   Base URL      (default: https://seconddns.com)
-#   SECONDDNS_API_KEY   X-API-Key     (required)
+# Options:
+#   -k KEY       X-API-Key (required, or set SECONDDNS_API_KEY env)
+#   -u URL       API base URL (default: https://seconddns.com)
+#   -t SECONDS   Connection + response timeout (default: 30)
+#   -z ZONE      Check a single zone by name (default: all zones)
+#   -h           Show this help
+#
+# Environment variables (used as fallbacks when flags are not set):
+#   SECONDDNS_API_KEY   X-API-Key
+#   SECONDDNS_API_URL   Base URL
 #
 # Exit codes:
 #   0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN
@@ -19,13 +24,29 @@ set -euo pipefail
 
 API_URL="${SECONDDNS_API_URL:-https://seconddns.com}"
 API_KEY="${SECONDDNS_API_KEY:-}"
+TIMEOUT=30
+ZONE=""
+
+usage() {
+  sed -n '2,/^$/s/^# \?//p' "$0"
+  exit 3
+}
+
+while getopts "k:u:t:z:h" opt; do
+  case $opt in
+    k) API_KEY="$OPTARG" ;;
+    u) API_URL="$OPTARG" ;;
+    t) TIMEOUT="$OPTARG" ;;
+    z) ZONE="$OPTARG" ;;
+    h) usage ;;
+    *) usage ;;
+  esac
+done
 
 if [ -z "$API_KEY" ]; then
-  echo "UNKNOWN - SECONDDNS_API_KEY not set"
+  echo "UNKNOWN - API key not set (use -k KEY or SECONDDNS_API_KEY env)"
   exit 3
 fi
-
-ZONE="${1:-}"
 
 if [ -n "$ZONE" ]; then
   ENDPOINT="${API_URL}/api/health/zones/${ZONE}?format=nagios"
@@ -33,10 +54,10 @@ else
   ENDPOINT="${API_URL}/api/health/zones?format=nagios"
 fi
 
-RESULT=$(curl -sf --max-time 30 \
+RESULT=$(curl -sf --connect-timeout "$TIMEOUT" --max-time "$TIMEOUT" \
   -H "X-API-Key: ${API_KEY}" \
   "$ENDPOINT" 2>/dev/null) || {
-  echo "UNKNOWN - API unreachable or returned error"
+  echo "UNKNOWN - API unreachable or returned error (${API_URL})"
   exit 3
 }
 
