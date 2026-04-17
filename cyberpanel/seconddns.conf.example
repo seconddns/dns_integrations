@@ -7,3 +7,7 @@ api_key = YOUR_API_KEY_HERE
 
 # Primary DNS server IP (leave empty to auto-detect)
 master_ip =
+
+# Secondary DNS server IPs (used by install.sh to configure AXFR in pdns.conf)
+# Comma-separated, IPv4 and IPv6
+dns_ips = 57.131.33.138,2001:41d0:2005:100::1284
