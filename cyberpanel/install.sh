@@ -35,10 +35,18 @@ if [ -d "$CYBERPANEL_DIR" ]; then
     cp seconddns.py "$PLUGIN_FILE"
     echo "[+] Installed plugin to $PLUGIN_FILE"
 
-    # Register signals on CyberPanel startup via ready.py
+    # Register signals on CyberPanel startup
+    INIT_FILE="$CYBERPANEL_DIR/CyberCP/__init__.py"
+    SIGNAL_TARGET=""
     if [ -f "$READY_FILE" ]; then
-        if ! grep -q "seconddns_plugin" "$READY_FILE"; then
-            cat >> "$READY_FILE" << 'HOOK'
+        SIGNAL_TARGET="$READY_FILE"
+    elif [ -f "$INIT_FILE" ]; then
+        SIGNAL_TARGET="$INIT_FILE"
+    fi
+
+    if [ -n "$SIGNAL_TARGET" ]; then
+        if ! grep -q "seconddns_plugin" "$SIGNAL_TARGET"; then
+            cat >> "$SIGNAL_TARGET" << 'HOOK'
 
 # SecondDNS integration — register domain create/delete signals
 try:
@@ -49,13 +57,13 @@ except Exception as e:
     import logging
     logging.getLogger("seconddns").error("Failed to register signals: %s", e)
 HOOK
-            echo "[+] Registered signals in CyberPanel startup"
+            echo "[+] Registered signals in $SIGNAL_TARGET"
         else
-            echo "[=] Signals already registered in CyberPanel"
+            echo "[=] Signals already registered in $SIGNAL_TARGET"
         fi
     else
-        echo "[!] $READY_FILE not found — signals must be registered manually"
-        echo "    Add this to CyberPanel startup:"
+        echo "[!] Neither $READY_FILE nor $INIT_FILE found"
+        echo "    Register signals manually in CyberPanel startup:"
         echo "      from plogical.seconddns_plugin import register_signals, setup_logging"
         echo "      setup_logging(); register_signals()"
     fi
