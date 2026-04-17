@@ -47,28 +47,48 @@ if [ -d "$CYBERPANEL_DIR" ]; then
         SIGNAL_TARGET="$INIT_FILE"
     fi
 
-    if [ -n "$SIGNAL_TARGET" ]; then
-        if ! grep -q "seconddns_plugin" "$SIGNAL_TARGET"; then
-            cat >> "$SIGNAL_TARGET" << 'HOOK'
-
-# SecondDNS integration — register domain create/delete signals
+    SIGNAL_BLOCK='# SecondDNS integration — register domain create/delete signals
 try:
     from plogical.seconddns_plugin import register_signals, setup_logging
     setup_logging()
     register_signals()
 except Exception as e:
     import logging
-    logging.getLogger("seconddns").error("Failed to register signals: %s", e)
-HOOK
-            echo "[+] Registered signals in $SIGNAL_TARGET"
-        else
-            echo "[=] Signals already registered in $SIGNAL_TARGET"
-        fi
+    logging.getLogger("seconddns").error("Failed to register signals: %s", e)'
+
+    if [ -n "$SIGNAL_TARGET" ]; then
+        # Clean ALL existing SecondDNS blocks from ALL possible locations
+        for cleanup_file in "$WSGI_FILE" "$INIT_FILE" "$READY_FILE"; do
+            [ -f "$cleanup_file" ] || continue
+            if grep -q "seconddns_plugin" "$cleanup_file"; then
+                python3 -c "
+import re, sys
+p = sys.argv[1]
+with open(p) as f: c = f.read()
+c = re.sub(r'\n*# SecondDNS integration[^\n]*\ntry:\n\s+from plogical\.seconddns_plugin.*?except[^\n]*\n\s+import logging\n\s+logging\.getLogger.*?\n', '', c, flags=re.DOTALL)
+with open(p, 'w') as f: f.write(c)
+" "$cleanup_file"
+                echo "[~] Cleaned old SecondDNS blocks from $cleanup_file"
+            fi
+        done
+
+        # Add single block to the target file
+        printf '\n%s\n' "$SIGNAL_BLOCK" >> "$SIGNAL_TARGET"
+        echo "[+] Registered signals in $SIGNAL_TARGET"
     else
-        echo "[!] Neither $READY_FILE nor $INIT_FILE found"
+        echo "[!] Neither $WSGI_FILE, $READY_FILE, nor $INIT_FILE found"
         echo "    Register signals manually in CyberPanel startup:"
         echo "      from plogical.seconddns_plugin import register_signals, setup_logging"
         echo "      setup_logging(); register_signals()"
+    fi
+
+    # Install systemd hook to survive CyberPanel updates
+    SYSTEMD_SERVICE="/etc/systemd/system/seconddns-signals.service"
+    if [ -f "seconddns-signals.service" ]; then
+        cp seconddns-signals.service "$SYSTEMD_SERVICE"
+        systemctl daemon-reload
+        systemctl enable seconddns-signals.service 2>/dev/null
+        echo "[+] Installed systemd hook — signals re-register on every lscpd restart"
     fi
 
     # Restart CyberPanel to load signals

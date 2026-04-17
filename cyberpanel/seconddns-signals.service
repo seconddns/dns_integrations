@@ -1,0 +1,12 @@
+[Unit]
+Description=SecondDNS signal registration for CyberPanel
+After=lscpd.service
+BindsTo=lscpd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/seconddns ensure-signals
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
