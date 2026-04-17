@@ -224,15 +224,60 @@ def cmd_list(config):
 
 # --- Django signal handlers (used when loaded as CyberPanel plugin) ---
 
+def _extract_domain(request, response=None):
+    """Extract domain name from CyberPanel request/response."""
+    keys = ("domainName", "domain", "websiteName")
+
+    # 1. Try request.body (JSON) — CyberPanel uses json.loads(request.body) in views
+    if hasattr(request, "body") and request.body:
+        try:
+            data = json.loads(request.body)
+            for k in keys:
+                v = data.get(k)
+                if v:
+                    return v
+        except (json.JSONDecodeError, AttributeError, ValueError):
+            pass
+
+    # 2. Try POST form data
+    if hasattr(request, "POST"):
+        for k in keys:
+            v = request.POST.get(k)
+            if v:
+                return v
+
+    # 3. Try GET params
+    if hasattr(request, "GET"):
+        for k in keys:
+            v = request.GET.get(k)
+            if v:
+                return v
+
+    # 4. Try response (coreResult) — may be HttpResponse with JSON body
+    if response and hasattr(response, "content"):
+        try:
+            data = json.loads(response.content)
+            for k in keys:
+                v = data.get(k) if isinstance(data, dict) else None
+                if v:
+                    return v
+        except (json.JSONDecodeError, AttributeError, ValueError):
+            pass
+
+    return ""
+
+
 def on_website_created(sender, **kwargs):
     """Django signal receiver for postWebsiteCreation."""
     try:
         request = kwargs.get("request")
+        response = kwargs.get("response")
         if not request:
             return
-        data = json.loads(request.body) if hasattr(request, "body") else {}
-        domain = data.get("domainName") or data.get("domain", "")
+        domain = _extract_domain(request, response)
+        logger.info("Signal postWebsiteCreation fired, domain=%s", domain or "(empty)")
         if not domain:
+            logger.warning("Could not extract domain from request/response")
             return
         config = load_config()
         if config:
@@ -245,11 +290,13 @@ def on_website_deleted(sender, **kwargs):
     """Django signal receiver for postWebsiteDeletion."""
     try:
         request = kwargs.get("request")
+        response = kwargs.get("response")
         if not request:
             return
-        data = json.loads(request.body) if hasattr(request, "body") else {}
-        domain = data.get("websiteName") or data.get("domainName") or data.get("domain", "")
+        domain = _extract_domain(request, response)
+        logger.info("Signal postWebsiteDeletion fired, domain=%s", domain or "(empty)")
         if not domain:
+            logger.warning("Could not extract domain from request/response")
             return
         config = load_config()
         if config:
