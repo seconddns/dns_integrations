@@ -44,7 +44,7 @@ def load_config():
 
     if os.path.exists(CONFIG_FILE):
         cp = configparser.ConfigParser()
-        cp.read(CONFIG_FILE)
+        cp.read(CONFIG_FILE, encoding="utf-8")
         if cp.has_section("seconddns"):
             config["api_url"] = cp.get("seconddns", "api_url", fallback="")
             config["api_key"] = cp.get("seconddns", "api_key", fallback="")
@@ -305,12 +305,18 @@ def on_website_deleted(sender, **kwargs):
         logger.error("Signal handler error (delete): %s", e)
 
 
+_signals_registered = False
+
 def register_signals():
-    """Connect to CyberPanel Django signals."""
+    """Connect to CyberPanel Django signals (once per process)."""
+    global _signals_registered
+    if _signals_registered:
+        return
     try:
         from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
-        postWebsiteCreation.connect(on_website_created)
-        postWebsiteDeletion.connect(on_website_deleted)
+        postWebsiteCreation.connect(on_website_created, dispatch_uid="seconddns_create")
+        postWebsiteDeletion.connect(on_website_deleted, dispatch_uid="seconddns_delete")
+        _signals_registered = True
         logger.info("SecondDNS signals registered.")
     except ImportError:
         logger.warning("CyberPanel signals not available (not running inside CyberPanel).")

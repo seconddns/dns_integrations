@@ -35,10 +35,13 @@ if [ -d "$CYBERPANEL_DIR" ]; then
     cp seconddns.py "$PLUGIN_FILE"
     echo "[+] Installed plugin to $PLUGIN_FILE"
 
-    # Register signals on CyberPanel startup
+    # Register signals — wsgi.py is the actual entry point for lswsgi workers
+    WSGI_FILE="$CYBERPANEL_DIR/CyberCP/wsgi.py"
     INIT_FILE="$CYBERPANEL_DIR/CyberCP/__init__.py"
     SIGNAL_TARGET=""
-    if [ -f "$READY_FILE" ]; then
+    if [ -f "$WSGI_FILE" ]; then
+        SIGNAL_TARGET="$WSGI_FILE"
+    elif [ -f "$READY_FILE" ]; then
         SIGNAL_TARGET="$READY_FILE"
     elif [ -f "$INIT_FILE" ]; then
         SIGNAL_TARGET="$INIT_FILE"
