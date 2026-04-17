@@ -96,8 +96,35 @@ if [ -n "$PDNS_CONF" ]; then
     echo "[=] Found $PDNS_CONF"
     ISSUES=0
 
-    # Read seconddns DNS IPs from config or use default
-    DNS_IPS="${SECONDDNS_IPS:-57.131.33.138,2001:41d0:2005:100::1284}"
+    # Resolve secondary DNS server IPs: API -> config -> env -> prompt
+    DNS_IPS=""
+    if [ -f "$CONFIG_FILE" ]; then
+        API_URL=$(grep -E "^api_url\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^api_url\s*=\s*//' | tr -d ' ')
+        API_KEY=$(grep -E "^api_key\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^api_key\s*=\s*//' | tr -d ' ')
+        # Try fetching DNS IPs from the service API
+        if [ -n "$API_URL" ] && [ -n "$API_KEY" ]; then
+            API_DNS_IPS=$(curl -sf --max-time 10 \
+                -H "X-API-Key: $API_KEY" \
+                -H "User-Agent: SecondDNS-Installer/1.0" \
+                "$API_URL/api/server-info" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null)
+            if [ -n "$API_DNS_IPS" ]; then
+                DNS_IPS="$API_DNS_IPS"
+                echo "[+] Got DNS server IPs from API: $DNS_IPS"
+            fi
+        fi
+        # Fallback to config file
+        if [ -z "$DNS_IPS" ]; then
+            DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
+        fi
+    fi
+    DNS_IPS="${SECONDDNS_IPS:-$DNS_IPS}"
+    if [ -z "$DNS_IPS" ]; then
+        echo "[?] Could not determine secondary DNS server IPs automatically."
+        read -p "    Enter secondary DNS IPs (comma-separated, e.g. 1.2.3.4,2001:db8::1): " DNS_IPS
+    fi
+    if [ -z "$DNS_IPS" ]; then
+        echo "[!] No DNS IPs provided — skipping AXFR config check"
+    fi
 
     # Check master mode
     if grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
