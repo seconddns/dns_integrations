@@ -85,6 +85,7 @@ def api_request(config, method, path, data=None):
     headers = {
         "X-API-Key": config["api_key"],
         "Content-Type": "application/json",
+        "User-Agent": "SecondDNS-CyberPanel/1.0",
     }
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
