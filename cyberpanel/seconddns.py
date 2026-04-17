@@ -267,6 +267,29 @@ def _extract_domain(request, response=None):
     return ""
 
 
+import fcntl
+LOCK_DIR = "/tmp"
+
+def _try_lock(domain, action):
+    """Non-blocking file lock — only one worker processes a given domain+action."""
+    lock_path = os.path.join(LOCK_DIR, f".seconddns_{action}_{domain}.lock")
+    try:
+        f = open(lock_path, "w")
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except (IOError, OSError):
+        return None
+
+
+def _unlock(f):
+    if f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+            f.close()
+        except (IOError, OSError):
+            pass
+
+
 def on_website_created(sender, **kwargs):
     """Django signal receiver for postWebsiteCreation."""
     try:
@@ -275,13 +298,18 @@ def on_website_created(sender, **kwargs):
         if not request:
             return 200
         domain = _extract_domain(request, response)
-        logger.info("Signal postWebsiteCreation fired, domain=%s", domain or "(empty)")
         if not domain:
-            logger.warning("Could not extract domain from request/response")
             return 200
-        config = load_config()
-        if config:
-            add_zone(config, domain)
+        lock = _try_lock(domain, "create")
+        if not lock:
+            return 200
+        try:
+            logger.info("Signal postWebsiteCreation fired, domain=%s", domain)
+            config = load_config()
+            if config:
+                add_zone(config, domain)
+        finally:
+            _unlock(lock)
     except Exception as e:
         logger.error("Signal handler error (create): %s", e)
     return 200
@@ -295,13 +323,18 @@ def on_website_deleted(sender, **kwargs):
         if not request:
             return 200
         domain = _extract_domain(request, response)
-        logger.info("Signal postWebsiteDeletion fired, domain=%s", domain or "(empty)")
         if not domain:
-            logger.warning("Could not extract domain from request/response")
             return 200
-        config = load_config()
-        if config:
-            remove_zone(config, domain)
+        lock = _try_lock(domain, "delete")
+        if not lock:
+            return 200
+        try:
+            logger.info("Signal postWebsiteDeletion fired, domain=%s", domain)
+            config = load_config()
+            if config:
+                remove_zone(config, domain)
+        finally:
+            _unlock(lock)
     except Exception as e:
         logger.error("Signal handler error (delete): %s", e)
     return 200
