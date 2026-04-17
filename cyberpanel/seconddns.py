@@ -44,7 +44,7 @@ def load_config():
 
     if os.path.exists(CONFIG_FILE):
         cp = configparser.ConfigParser()
-        cp.read(CONFIG_FILE)
+        cp.read(CONFIG_FILE, encoding="utf-8")
         if cp.has_section("seconddns"):
             config["api_url"] = cp.get("seconddns", "api_url", fallback="")
             config["api_key"] = cp.get("seconddns", "api_key", fallback="")
