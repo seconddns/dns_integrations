@@ -273,17 +273,18 @@ def on_website_created(sender, **kwargs):
         request = kwargs.get("request")
         response = kwargs.get("response")
         if not request:
-            return
+            return 200
         domain = _extract_domain(request, response)
         logger.info("Signal postWebsiteCreation fired, domain=%s", domain or "(empty)")
         if not domain:
             logger.warning("Could not extract domain from request/response")
-            return
+            return 200
         config = load_config()
         if config:
             add_zone(config, domain)
     except Exception as e:
         logger.error("Signal handler error (create): %s", e)
+    return 200
 
 
 def on_website_deleted(sender, **kwargs):
@@ -292,17 +293,18 @@ def on_website_deleted(sender, **kwargs):
         request = kwargs.get("request")
         response = kwargs.get("response")
         if not request:
-            return
+            return 200
         domain = _extract_domain(request, response)
         logger.info("Signal postWebsiteDeletion fired, domain=%s", domain or "(empty)")
         if not domain:
             logger.warning("Could not extract domain from request/response")
-            return
+            return 200
         config = load_config()
         if config:
             remove_zone(config, domain)
     except Exception as e:
         logger.error("Signal handler error (delete): %s", e)
+    return 200
 
 
 _signals_registered = False
