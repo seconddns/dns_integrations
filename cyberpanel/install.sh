@@ -97,7 +97,7 @@ if [ -n "$PDNS_CONF" ]; then
     ISSUES=0
 
     # Read seconddns DNS IPs from config or use default
-    DNS_IPS="${SECONDDNS_IPS:-57.131.33.138}"
+    DNS_IPS="${SECONDDNS_IPS:-57.131.33.138,2001:41d0:2005:100::1284}"
 
     # Check master mode
     if grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
