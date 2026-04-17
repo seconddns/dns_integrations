@@ -44,8 +44,9 @@ while getopts "k:u:t:z:h" opt; do
 done
 
 if [ -z "$API_KEY" ]; then
-  echo "UNKNOWN - API key not set (use -k KEY or SECONDDNS_API_KEY env)"
-  exit 3
+  echo "UNKNOWN - API key not set"
+  echo ""
+  usage
 fi
 
 if [ -n "$ZONE" ]; then
