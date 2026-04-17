@@ -267,8 +267,8 @@ def _extract_domain(request, response=None):
     return ""
 
 
-def on_website_created(sender, **kwargs):
-    """Django signal receiver for postWebsiteCreation."""
+def on_zone_created(sender, **kwargs):
+    """Signal receiver for DNS zone creation."""
     try:
         request = kwargs.get("request")
         response = kwargs.get("response")
@@ -277,7 +277,7 @@ def on_website_created(sender, **kwargs):
         domain = _extract_domain(request, response)
         if not domain:
             return 200
-        logger.info("Signal postWebsiteCreation fired, domain=%s", domain)
+        logger.info("Zone created: %s", domain)
         config = load_config()
         if config:
             add_zone(config, domain)
@@ -286,8 +286,8 @@ def on_website_created(sender, **kwargs):
     return 200
 
 
-def on_website_deleted(sender, **kwargs):
-    """Django signal receiver for postWebsiteDeletion."""
+def on_zone_deleted(sender, **kwargs):
+    """Signal receiver for DNS zone deletion."""
     try:
         request = kwargs.get("request")
         response = kwargs.get("response")
@@ -296,7 +296,7 @@ def on_website_deleted(sender, **kwargs):
         domain = _extract_domain(request, response)
         if not domain:
             return 200
-        logger.info("Signal postWebsiteDeletion fired, domain=%s", domain)
+        logger.info("Zone deleted: %s", domain)
         config = load_config()
         if config:
             remove_zone(config, domain)
@@ -308,18 +308,25 @@ def on_website_deleted(sender, **kwargs):
 _signals_registered = False
 
 def register_signals():
-    """Connect to CyberPanel Django signals (once per process)."""
+    """Connect to CyberPanel DNS zone signals (once per process)."""
     global _signals_registered
     if _signals_registered:
         return
     try:
-        from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
-        postWebsiteCreation.connect(on_website_created, dispatch_uid="seconddns_create")
-        postWebsiteDeletion.connect(on_website_deleted, dispatch_uid="seconddns_delete")
+        from dns.signals import postZoneCreation, postSubmitZoneDeletion
+        postZoneCreation.connect(on_zone_created, dispatch_uid="seconddns_create")
+        postSubmitZoneDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_delete")
         _signals_registered = True
-        logger.info("SecondDNS signals registered.")
+        logger.info("SecondDNS signals registered (dns zone hooks).")
     except ImportError:
-        logger.warning("CyberPanel signals not available (not running inside CyberPanel).")
+        try:
+            from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
+            postWebsiteCreation.connect(on_zone_created, dispatch_uid="seconddns_create")
+            postWebsiteDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_delete")
+            _signals_registered = True
+            logger.info("SecondDNS signals registered (website hooks fallback).")
+        except ImportError:
+            logger.warning("CyberPanel signals not available.")
 
 
 SIGNAL_BLOCK = """
