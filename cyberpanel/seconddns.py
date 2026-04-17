@@ -322,6 +322,65 @@ def register_signals():
         logger.warning("CyberPanel signals not available (not running inside CyberPanel).")
 
 
+SIGNAL_BLOCK = """
+# SecondDNS integration — register domain create/delete signals
+try:
+    from plogical.seconddns_plugin import register_signals, setup_logging
+    setup_logging()
+    register_signals()
+except Exception as e:
+    import logging
+    logging.getLogger("seconddns").error("Failed to register signals: %s", e)
+"""
+
+SIGNAL_MARKER = "seconddns_plugin"
+CYBERPANEL_DIR = "/usr/local/CyberCP"
+
+
+def _clean_signal_blocks(filepath):
+    """Remove all SecondDNS signal blocks from a file."""
+    import re
+    if not os.path.isfile(filepath):
+        return
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+    if SIGNAL_MARKER not in content:
+        return
+    cleaned = re.sub(
+        r'\n*# SecondDNS integration[^\n]*\ntry:\n\s+from plogical\.seconddns_plugin.*?except[^\n]*\n\s+import logging\n\s+logging\.getLogger.*?\n',
+        '', content, flags=re.DOTALL)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(cleaned)
+    logger.info("Cleaned old signal blocks from %s", filepath)
+
+
+def ensure_signals():
+    """Ensure exactly one signal registration block exists in wsgi.py.
+    Safe to run repeatedly — cleans duplicates, adds if missing.
+    Called by systemd after lscpd restart to survive CyberPanel updates."""
+    wsgi = os.path.join(CYBERPANEL_DIR, "CyberCP", "wsgi.py")
+    init = os.path.join(CYBERPANEL_DIR, "CyberCP", "__init__.py")
+    ready = os.path.join(CYBERPANEL_DIR, "CyberCP", "ready.py")
+
+    # Clean all locations
+    for f in [wsgi, init, ready]:
+        _clean_signal_blocks(f)
+
+    # Add to wsgi.py (preferred target)
+    target = wsgi
+    if not os.path.isfile(target):
+        target = init if os.path.isfile(init) else ready
+    if not os.path.isfile(target):
+        logger.error("No suitable CyberPanel entry point found")
+        print("[!] No wsgi.py, __init__.py, or ready.py found")
+        return
+
+    with open(target, "a", encoding="utf-8") as f:
+        f.write(SIGNAL_BLOCK)
+    logger.info("Signal block added to %s", target)
+    print(f"[+] Signals ensured in {target}")
+
+
 # --- CLI ---
 
 def main():
@@ -344,6 +403,8 @@ def main():
         sync(config)
     elif cmd == "list":
         cmd_list(config)
+    elif cmd == "ensure-signals":
+        ensure_signals()
     else:
         print(__doc__)
         sys.exit(1)

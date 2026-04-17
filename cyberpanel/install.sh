@@ -82,6 +82,15 @@ with open(p, 'w') as f: f.write(c)
         echo "      setup_logging(); register_signals()"
     fi
 
+    # Install systemd hook to survive CyberPanel updates
+    SYSTEMD_SERVICE="/etc/systemd/system/seconddns-signals.service"
+    if [ -f "seconddns-signals.service" ]; then
+        cp seconddns-signals.service "$SYSTEMD_SERVICE"
+        systemctl daemon-reload
+        systemctl enable seconddns-signals.service 2>/dev/null
+        echo "[+] Installed systemd hook — signals re-register on every lscpd restart"
+    fi
+
     # Restart CyberPanel to load signals
     echo ""
     read -p "Restart CyberPanel (lscpd) to activate? [y/N] " -n 1 -r
