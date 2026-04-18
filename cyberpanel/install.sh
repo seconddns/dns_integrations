@@ -115,16 +115,15 @@ if [ -n "$CAN_V4" ] && [ -n "$CAN_V6" ]; then
     echo "[+] Both protocols available:"
     echo "    1) IPv4: server $SERVER_V4 ↔ secondary $API_HAS_V4"
     echo "    2) IPv6: server $SERVER_V6 ↔ secondary $API_HAS_V6"
-    read -p "    Choose [1]: " -n 1 -r < /dev/tty
-    echo
-    case $REPLY in
-        1) IP_PREFERENCE="v4" ;;
-        2) IP_PREFERENCE="v6" ;;
-        *)
-            echo "    Invalid choice, using IPv4"
-            IP_PREFERENCE="v4"
-            ;;
-    esac
+    while true; do
+        read -p "    Choose (1 or 2): " -n 1 -r < /dev/tty
+        echo
+        case $REPLY in
+            1) IP_PREFERENCE="v4"; break ;;
+            2) IP_PREFERENCE="v6"; break ;;
+            *) echo "    Please enter 1 or 2" ;;
+        esac
+    done
 elif [ -n "$CAN_V6" ]; then
     IP_PREFERENCE="v6"
 elif [ -n "$CAN_V4" ]; then
