@@ -17,7 +17,7 @@ done
 
 confirm() {
     [ "$AUTO_YES" -eq 1 ] && return 0
-    read -p "$1 [y/N] " -n 1 -r
+    read -p "$1 [y/N] " -n 1 -r < /dev/tty 2>/dev/null || return 1
     echo
     [[ $REPLY =~ ^[Yy]$ ]]
 }

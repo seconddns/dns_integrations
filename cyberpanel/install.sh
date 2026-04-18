@@ -66,7 +66,7 @@ download_file() {
 
 confirm() {
     [ "$AUTO_YES" -eq 1 ] && return 0
-    read -p "$1 [y/N] " -n 1 -r
+    read -p "$1 [y/N] " -n 1 -r < /dev/tty 2>/dev/null || return 1
     echo
     [[ $REPLY =~ ^[Yy]$ ]]
 }
@@ -82,7 +82,7 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Auto-detected master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP
+        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty 2>/dev/null
     fi
 fi
 
@@ -202,17 +202,25 @@ if [ -n "$PDNS_CONF" ]; then
         echo "[+] Secondary DNS IPs from API: $DNS_IPS"
     else
         DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
-        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS
+        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS < /dev/tty 2>/dev/null
     fi
 
     if [ -n "$DNS_IPS" ]; then
         ISSUES=0
-        grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
-        grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
-        grep -qE "^also-notify=" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
+        if ! grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] master=yes is missing"
+            ISSUES=$((ISSUES+1))
+        fi
+        if ! grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] allow-axfr-ips does not include ${DNS_IPS%%,*}"
+            ISSUES=$((ISSUES+1))
+        fi
+        if ! grep -qE "^also-notify=" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] also-notify is not configured"
+            ISSUES=$((ISSUES+1))
+        fi
 
         if [ "$ISSUES" -gt 0 ]; then
-            echo "[!] PowerDNS needs AXFR configuration ($ISSUES issues)"
             if confirm "Apply fixes automatically? (backup will be created)"; then
                 cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
 
