@@ -21,9 +21,9 @@ confirm() {
         echo "[!] No interactive terminal. Use --yes to skip prompts."
         exit 1
     fi
-    read -p "$1 [y/N] " -n 1 -r < /dev/tty
+    read -p "$1 [Y/n] " -n 1 -r < /dev/tty
     echo
-    [[ $REPLY =~ ^[Yy]$ ]]
+    [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
 echo "=== SecondDNS CyberPanel Uninstaller ==="
