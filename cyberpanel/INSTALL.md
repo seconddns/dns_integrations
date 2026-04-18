@@ -92,26 +92,12 @@ The installer adds a systemd service (`seconddns-signals.service`) that re-regis
 ## Uninstall
 
 ```bash
-# Remove signals from wsgi.py
-seconddns ensure-signals  # cleans first, but we won't re-add
-python3 -c "
-import re
-for p in ['/usr/local/CyberCP/CyberCP/wsgi.py']:
-    with open(p) as f: c = f.read()
-    c = re.sub(r'\n*# SecondDNS.*?getLogger.*?\n', '', c, flags=re.DOTALL)
-    with open(p, 'w') as f: f.write(c)
-"
-
-# Remove files
-rm -f /usr/local/bin/seconddns
-rm -f /etc/seconddns.conf
-rm -f /usr/local/CyberCP/plogical/seconddns_plugin.py
-rm -f /etc/systemd/system/seconddns-signals.service
-systemctl daemon-reload
-
-# Restart CyberPanel
-systemctl restart lscpd
+curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/uninstall.sh | bash
 ```
+
+Or non-interactive: `... | bash -s -- --yes`
+
+Removes all files, signal blocks, and the systemd hook. DNS zones on SecondDNS are NOT deleted — remove them via Dashboard or API if needed.
 
 ## Troubleshooting
 
