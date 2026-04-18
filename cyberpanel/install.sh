@@ -70,9 +70,9 @@ confirm() {
         echo "[!] No interactive terminal. Use --yes to skip prompts."
         exit 1
     fi
-    read -p "$1 [y/N] " -n 1 -r < /dev/tty
+    read -p "$1 [Y/n] " -n 1 -r < /dev/tty
     echo
-    [[ $REPLY =~ ^[Yy]$ ]]
+    [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
 echo "=== SecondDNS CyberPanel Integration ==="
@@ -203,10 +203,24 @@ if [ -n "$PDNS_CONF" ]; then
         python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
 
     if [ -n "$DNS_IPS" ]; then
-        echo "[+] Secondary DNS IPs from API: $DNS_IPS"
+        IPV4=$(echo "$DNS_IPS" | tr ',' '\n' | grep -v ':' | tr '\n' ',' | sed 's/,$//')
+        IPV6=$(echo "$DNS_IPS" | tr ',' '\n' | grep ':' | tr '\n' ',' | sed 's/,$//')
+
+        if [ -n "$IPV4" ] && [ -n "$IPV6" ]; then
+            echo "[+] Secondary DNS IPs from API:"
+            echo "    1) IPv4: $IPV4"
+            echo "    2) IPv6: $IPV6"
+            read -p "    Choose [1]: " -n 1 -r < /dev/tty
+            echo
+            case $REPLY in
+                2) DNS_IPS="$IPV6" ;;
+                *) DNS_IPS="$IPV4" ;;
+            esac
+        fi
+        echo "[+] Using: $DNS_IPS"
     else
         DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
-        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS < /dev/tty 2>/dev/null
+        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS < /dev/tty
     fi
 
     if [ -n "$DNS_IPS" ]; then
@@ -255,10 +269,22 @@ else
     echo "[!] pdns.conf not found — configure AXFR manually"
 fi
 
-# Initial sync
-echo ""
-if confirm "Sync existing domains now?"; then
-    "$INSTALL_DIR/seconddns" sync
+# Initial sync — check CyberPanel domains, ask if any exist
+DOMAIN_COUNT=$(python3 -c "
+import sys; sys.path.insert(0, '/usr/local/CyberCP')
+try:
+    import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'CyberCP.settings')
+    import django; django.setup()
+    from websiteFunctions.models import Websites
+    print(Websites.objects.count())
+except: print(0)
+" 2>/dev/null || echo "0")
+
+if [ "$DOMAIN_COUNT" -gt 0 ]; then
+    echo ""
+    if confirm "Found $DOMAIN_COUNT domains. Sync to secondary DNS now?"; then
+        "$INSTALL_DIR/seconddns" sync
+    fi
 fi
 
 echo ""
