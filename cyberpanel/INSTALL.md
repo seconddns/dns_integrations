@@ -27,11 +27,6 @@ curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyber
 tail -f /var/log/seconddns.log
 ```
 
-**Re-register signals after CyberPanel update:**
-```bash
-seconddns ensure-signals && systemctl restart lscpd
-```
-
 **Verify AXFR config:**
 ```bash
 grep -E "^master=|^allow-axfr-ips=|^also-notify=" /etc/pdns/pdns.conf
