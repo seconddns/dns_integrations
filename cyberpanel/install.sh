@@ -203,10 +203,24 @@ if [ -n "$PDNS_CONF" ]; then
         python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
 
     if [ -n "$DNS_IPS" ]; then
-        echo "[+] Secondary DNS IPs from API: $DNS_IPS"
+        IPV4=$(echo "$DNS_IPS" | tr ',' '\n' | grep -v ':' | tr '\n' ',' | sed 's/,$//')
+        IPV6=$(echo "$DNS_IPS" | tr ',' '\n' | grep ':' | tr '\n' ',' | sed 's/,$//')
+
+        if [ -n "$IPV4" ] && [ -n "$IPV6" ]; then
+            echo "[+] Secondary DNS IPs from API:"
+            echo "    1) IPv4: $IPV4"
+            echo "    2) IPv6: $IPV6"
+            read -p "    Choose [1]: " -n 1 -r < /dev/tty
+            echo
+            case $REPLY in
+                2) DNS_IPS="$IPV6" ;;
+                *) DNS_IPS="$IPV4" ;;
+            esac
+        fi
+        echo "[+] Using: $DNS_IPS"
     else
         DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
-        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS < /dev/tty 2>/dev/null
+        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS < /dev/tty
     fi
 
     if [ -n "$DNS_IPS" ]; then
