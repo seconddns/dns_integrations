@@ -1,53 +1,138 @@
 #!/bin/bash
 set -e
 
+# SecondDNS CyberPanel Integration Installer
+# Usage:
+#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
+#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
+
+REPO_RAW="https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_FILE="/etc/seconddns.conf"
 CYBERPANEL_DIR="/usr/local/CyberCP"
 PLUGIN_FILE="$CYBERPANEL_DIR/plogical/seconddns_plugin.py"
+WSGI_FILE="$CYBERPANEL_DIR/CyberCP/wsgi.py"
+INIT_FILE="$CYBERPANEL_DIR/CyberCP/__init__.py"
 READY_FILE="$CYBERPANEL_DIR/CyberCP/ready.py"
+LOG_FILE="/var/log/seconddns.log"
+
+API_KEY=""
+API_URL="https://seconddns.com"
+MASTER_IP=""
+AUTO_YES=0
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --api-key=*) API_KEY="${arg#*=}" ;;
+        --api-url=*) API_URL="${arg#*=}" ;;
+        --master-ip=*) MASTER_IP="${arg#*=}" ;;
+        --yes|-y) AUTO_YES=1 ;;
+        --help|-h)
+            echo "Usage: $0 --api-key=KEY [--api-url=URL] [--master-ip=IP] [--yes]"
+            echo ""
+            echo "  --api-key=KEY     Your SecondDNS API key (required)"
+            echo "  --api-url=URL     API base URL (default: https://seconddns.com)"
+            echo "  --master-ip=IP    Primary DNS server IP (default: auto-detect)"
+            echo "  --yes             Skip confirmation prompts"
+            exit 0
+            ;;
+    esac
+done
+
+if [ -z "$API_KEY" ]; then
+    echo "Error: --api-key is required"
+    echo "Get your key from: ${API_URL}/dashboard/api-key"
+    echo ""
+    echo "Usage: $0 --api-key=YOUR_KEY"
+    exit 1
+fi
+
+# Detect if running from repo clone or curl pipe
+LOCAL_MODE=0
+[ -f "seconddns.py" ] && LOCAL_MODE=1
+
+download_file() {
+    local file="$1" dest="$2"
+    if [ "$LOCAL_MODE" -eq 1 ] && [ -f "$file" ]; then
+        cp "$file" "$dest"
+    else
+        curl -sf --max-time 30 -o "$dest" "${REPO_RAW}/${file}" || {
+            echo "[!] Failed to download $file"
+            exit 1
+        }
+    fi
+}
+
+confirm() {
+    [ "$AUTO_YES" -eq 1 ] && return 0
+    read -p "$1 [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]]
+}
 
 echo "=== SecondDNS CyberPanel Integration ==="
 echo ""
 
-# Copy CLI script
-cp seconddns.py "$INSTALL_DIR/seconddns"
+# Auto-detect master IP
+if [ -z "$MASTER_IP" ]; then
+    MASTER_IP=$(curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || \
+                curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
+    if [ -n "$MASTER_IP" ]; then
+        echo "[+] Auto-detected master IP: $MASTER_IP"
+    else
+        echo "[!] Could not auto-detect master IP"
+        read -p "    Enter your primary DNS server IP: " MASTER_IP
+    fi
+fi
+
+# Verify API key
+echo "[*] Verifying API key..."
+VERIFY=$(curl -sf --max-time 10 \
+    -H "X-API-Key: $API_KEY" \
+    -H "User-Agent: SecondDNS-Installer/1.0" \
+    "$API_URL/api/zones" 2>/dev/null) && {
+    echo "[+] API key valid"
+} || {
+    echo "[!] API key verification failed — check your key and URL"
+    echo "    URL: $API_URL"
+    echo "    Key: ${API_KEY:0:8}..."
+    exit 1
+}
+
+# Install CLI
+echo ""
+download_file "seconddns.py" "$INSTALL_DIR/seconddns"
 chmod +x "$INSTALL_DIR/seconddns"
 echo "[+] Installed CLI to $INSTALL_DIR/seconddns"
 
-# Config
-if [ ! -f "$CONFIG_FILE" ]; then
-    cp seconddns.conf.example "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
-    echo "[+] Created config at $CONFIG_FILE"
-    echo "    Edit it and set your api_url and api_key"
-else
-    echo "[=] Config already exists at $CONFIG_FILE"
+# Create config
+cat > "$CONFIG_FILE" << EOF
+[seconddns]
+api_url = $API_URL
+api_key = $API_KEY
+master_ip = $MASTER_IP
+EOF
+chown root:root "$CONFIG_FILE"
+chmod 644 "$CONFIG_FILE"
+echo "[+] Config written to $CONFIG_FILE"
+
+# Log file with correct permissions
+touch "$LOG_FILE"
+if id cyberpanel &>/dev/null; then
+    chown cyberpanel:cyberpanel "$LOG_FILE"
 fi
+chmod 664 "$LOG_FILE"
+echo "[+] Log file: $LOG_FILE"
 
-# Log dir
-mkdir -p /var/lib/seconddns
-touch /var/log/seconddns.log
-echo "[+] Created log file /var/log/seconddns.log"
-
-# Install Django signal plugin into CyberPanel
+# Install CyberPanel plugin
 if [ -d "$CYBERPANEL_DIR" ]; then
-    cp seconddns.py "$PLUGIN_FILE"
+    download_file "seconddns.py" "$PLUGIN_FILE"
     echo "[+] Installed plugin to $PLUGIN_FILE"
 
-    # Register signals — wsgi.py is the actual entry point for lswsgi workers
-    WSGI_FILE="$CYBERPANEL_DIR/CyberCP/wsgi.py"
-    INIT_FILE="$CYBERPANEL_DIR/CyberCP/__init__.py"
-    SIGNAL_TARGET=""
-    if [ -f "$WSGI_FILE" ]; then
-        SIGNAL_TARGET="$WSGI_FILE"
-    elif [ -f "$READY_FILE" ]; then
-        SIGNAL_TARGET="$READY_FILE"
-    elif [ -f "$INIT_FILE" ]; then
-        SIGNAL_TARGET="$INIT_FILE"
-    fi
-
-    SIGNAL_BLOCK='# SecondDNS integration — register domain create/delete signals
+    # Clean and register signals
+    SIGNAL_BLOCK='
+# SecondDNS integration — register domain create/delete signals
 try:
     from plogical.seconddns_plugin import register_signals, setup_logging
     setup_logging()
@@ -56,55 +141,46 @@ except Exception as e:
     import logging
     logging.getLogger("seconddns").error("Failed to register signals: %s", e)'
 
+    SIGNAL_TARGET=""
+    [ -f "$WSGI_FILE" ] && SIGNAL_TARGET="$WSGI_FILE"
+    [ -z "$SIGNAL_TARGET" ] && [ -f "$READY_FILE" ] && SIGNAL_TARGET="$READY_FILE"
+    [ -z "$SIGNAL_TARGET" ] && [ -f "$INIT_FILE" ] && SIGNAL_TARGET="$INIT_FILE"
+
     if [ -n "$SIGNAL_TARGET" ]; then
-        # Clean ALL existing SecondDNS blocks from ALL possible locations
-        for cleanup_file in "$WSGI_FILE" "$INIT_FILE" "$READY_FILE"; do
-            [ -f "$cleanup_file" ] || continue
-            if grep -q "seconddns_plugin" "$cleanup_file"; then
+        for f in "$WSGI_FILE" "$INIT_FILE" "$READY_FILE"; do
+            [ -f "$f" ] && grep -q "seconddns_plugin" "$f" 2>/dev/null && \
                 python3 -c "
 import re, sys
 p = sys.argv[1]
 with open(p) as f: c = f.read()
 c = re.sub(r'\n*# SecondDNS integration[^\n]*\ntry:\n\s+from plogical\.seconddns_plugin.*?except[^\n]*\n\s+import logging\n\s+logging\.getLogger.*?\n', '', c, flags=re.DOTALL)
 with open(p, 'w') as f: f.write(c)
-" "$cleanup_file"
-                echo "[~] Cleaned old SecondDNS blocks from $cleanup_file"
-            fi
+" "$f" && echo "[~] Cleaned old blocks from $f"
         done
-
-        # Add single block to the target file
-        printf '\n%s\n' "$SIGNAL_BLOCK" >> "$SIGNAL_TARGET"
+        printf '%s\n' "$SIGNAL_BLOCK" >> "$SIGNAL_TARGET"
         echo "[+] Registered signals in $SIGNAL_TARGET"
     else
-        echo "[!] Neither $WSGI_FILE, $READY_FILE, nor $INIT_FILE found"
-        echo "    Register signals manually in CyberPanel startup:"
-        echo "      from plogical.seconddns_plugin import register_signals, setup_logging"
-        echo "      setup_logging(); register_signals()"
+        echo "[!] No CyberPanel entry point found — register signals manually"
     fi
 
-    # Install systemd hook to survive CyberPanel updates
+    # Systemd hook
     SYSTEMD_SERVICE="/etc/systemd/system/seconddns-signals.service"
-    if [ -f "seconddns-signals.service" ]; then
-        cp seconddns-signals.service "$SYSTEMD_SERVICE"
-        systemctl daemon-reload
-        systemctl enable seconddns-signals.service 2>/dev/null
-        echo "[+] Installed systemd hook — signals re-register on every lscpd restart"
-    fi
+    download_file "seconddns-signals.service" "$SYSTEMD_SERVICE"
+    systemctl daemon-reload
+    systemctl enable seconddns-signals.service 2>/dev/null
+    echo "[+] Systemd hook installed (survives CyberPanel updates)"
 
-    # Restart CyberPanel to load signals
+    # Restart
     echo ""
-    read -p "Restart CyberPanel (lscpd) to activate? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "Restart CyberPanel (lscpd) to activate?"; then
         systemctl restart lscpd
         echo "[+] CyberPanel restarted"
     fi
 else
-    echo "[!] CyberPanel not found at $CYBERPANEL_DIR"
-    echo "    Plugin signals not installed — use CLI commands instead"
+    echo "[!] CyberPanel not found — CLI-only mode"
 fi
 
-# Check PowerDNS AXFR configuration
+# PowerDNS AXFR check
 echo ""
 echo "--- PowerDNS AXFR check ---"
 PDNS_CONF=""
@@ -114,134 +190,71 @@ done
 
 if [ -n "$PDNS_CONF" ]; then
     echo "[=] Found $PDNS_CONF"
-    ISSUES=0
 
-    # Resolve secondary DNS server IPs: API -> config -> env -> prompt
-    DNS_IPS=""
-    if [ -f "$CONFIG_FILE" ]; then
-        API_URL=$(grep -E "^api_url\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^api_url\s*=\s*//' | tr -d ' ')
-        API_KEY=$(grep -E "^api_key\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^api_key\s*=\s*//' | tr -d ' ')
-        # Try fetching DNS IPs from the service API
-        if [ -n "$API_URL" ] && [ -n "$API_KEY" ]; then
-            API_DNS_IPS=$(curl -sf --max-time 10 \
-                -H "X-API-Key: $API_KEY" \
-                -H "User-Agent: SecondDNS-Installer/1.0" \
-                "$API_URL/api/server-info" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null)
-            if [ -n "$API_DNS_IPS" ]; then
-                DNS_IPS="$API_DNS_IPS"
-                echo "[+] Got DNS server IPs from API: $DNS_IPS"
-            fi
-        fi
-        # Fallback to config file
-        if [ -z "$DNS_IPS" ]; then
-            DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
-        fi
-    fi
-    DNS_IPS="${SECONDDNS_IPS:-$DNS_IPS}"
-    if [ -z "$DNS_IPS" ]; then
-        echo "[?] Could not determine secondary DNS server IPs automatically."
-        read -p "    Enter secondary DNS IPs (comma-separated, e.g. 1.2.3.4,2001:db8::1): " DNS_IPS
-    fi
-    if [ -z "$DNS_IPS" ]; then
-        echo "[!] No DNS IPs provided — skipping AXFR config check"
-    fi
+    # Get secondary DNS IPs from API
+    DNS_IPS=$(curl -sf --max-time 10 \
+        -H "X-API-Key: $API_KEY" \
+        -H "User-Agent: SecondDNS-Installer/1.0" \
+        "$API_URL/api/server-info" 2>/dev/null | \
+        python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
 
-    # Check master mode
-    if grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
-        echo "[+] master=yes is set"
+    if [ -n "$DNS_IPS" ]; then
+        echo "[+] Secondary DNS IPs from API: $DNS_IPS"
     else
-        echo "[!] master is NOT enabled. AXFR transfers will not work."
-        echo "    Add to $PDNS_CONF:"
-        echo "      master=yes"
-        ISSUES=$((ISSUES+1))
+        DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
+        [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IPs: " DNS_IPS
     fi
 
-    # Check allow-axfr-ips
-    if grep -qE "^allow-axfr-ips=.*$DNS_IPS" "$PDNS_CONF" 2>/dev/null; then
-        echo "[+] allow-axfr-ips includes $DNS_IPS"
-    else
-        CURRENT_AXFR=$(grep -E "^allow-axfr-ips=" "$PDNS_CONF" 2>/dev/null | head -1)
-        if [ -n "$CURRENT_AXFR" ]; then
-            echo "[!] allow-axfr-ips is set but does NOT include $DNS_IPS"
-            echo "    Current: $CURRENT_AXFR"
-            echo "    Update to: allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS"
-        else
-            echo "[!] allow-axfr-ips is not set (default: localhost only)"
-            echo "    Add to $PDNS_CONF:"
-            echo "      allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS"
-        fi
-        ISSUES=$((ISSUES+1))
-    fi
+    if [ -n "$DNS_IPS" ]; then
+        ISSUES=0
+        grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
+        grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
+        grep -qE "^also-notify=" "$PDNS_CONF" 2>/dev/null || ISSUES=$((ISSUES+1))
 
-    # Check also-notify
-    if grep -qE "^also-notify=.*$DNS_IPS" "$PDNS_CONF" 2>/dev/null; then
-        echo "[+] also-notify includes $DNS_IPS"
-    else
-        echo "[!] also-notify does not include $DNS_IPS"
-        echo "    Add to $PDNS_CONF:"
-        echo "      also-notify=$DNS_IPS"
-        echo "    This ensures your secondary is notified instantly on zone changes."
-        ISSUES=$((ISSUES+1))
-    fi
+        if [ "$ISSUES" -gt 0 ]; then
+            echo "[!] PowerDNS needs AXFR configuration ($ISSUES issues)"
+            if confirm "Apply fixes automatically? (backup will be created)"; then
+                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
 
-    if [ "$ISSUES" -gt 0 ]; then
-        echo ""
-        read -p "Apply these fixes automatically? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
-
-            # master=yes
-            if ! grep -qE "^master=yes" "$PDNS_CONF"; then
-                sed -i '/^# master=no/a master=yes' "$PDNS_CONF"
-                # fallback if comment not found
                 grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
-            fi
 
-            # allow-axfr-ips
-            if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
-                if ! grep -qE "^allow-axfr-ips=.*$DNS_IPS" "$PDNS_CONF"; then
-                    sed -i "s|^allow-axfr-ips=\(.*\)|allow-axfr-ips=\1,$DNS_IPS|" "$PDNS_CONF"
+                if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
+                    grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" || \
+                        sed -i "s|^allow-axfr-ips=\(.*\)|allow-axfr-ips=\1,$DNS_IPS|" "$PDNS_CONF"
+                else
+                    echo "allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS" >> "$PDNS_CONF"
                 fi
-            else
-                echo "allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS" >> "$PDNS_CONF"
-            fi
 
-            # also-notify
-            if grep -qE "^also-notify=" "$PDNS_CONF"; then
-                if ! grep -qE "^also-notify=.*$DNS_IPS" "$PDNS_CONF"; then
-                    sed -i "s|^also-notify=\(.*\)|also-notify=\1,$DNS_IPS|" "$PDNS_CONF"
+                if grep -qE "^also-notify=" "$PDNS_CONF"; then
+                    grep -qE "^also-notify=.*${DNS_IPS%%,*}" "$PDNS_CONF" || \
+                        sed -i "s|^also-notify=\(.*\)|also-notify=\1,$DNS_IPS|" "$PDNS_CONF"
+                else
+                    echo "also-notify=$DNS_IPS" >> "$PDNS_CONF"
                 fi
-            else
-                echo "also-notify=$DNS_IPS" >> "$PDNS_CONF"
-            fi
 
-            echo "[+] PowerDNS config updated. Backup: ${PDNS_CONF}.bak.*"
-            echo "[+] Restarting PowerDNS..."
-            systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
-            echo "[+] Done."
+                systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                echo "[+] PowerDNS configured and restarted"
+            fi
+        else
+            echo "[+] PowerDNS AXFR config OK"
         fi
-    else
-        echo "[+] PowerDNS AXFR config looks good."
     fi
 else
-    echo "[!] pdns.conf not found — check PowerDNS AXFR config manually:"
-    echo "    master=yes"
-    echo "    allow-axfr-ips=127.0.0.0/8,::1,<SECONDARY_DNS_IP>"
-    echo "    also-notify=<SECONDARY_DNS_IP>"
+    echo "[!] pdns.conf not found — configure AXFR manually"
+fi
+
+# Initial sync
+echo ""
+if confirm "Sync existing domains now?"; then
+    "$INSTALL_DIR/seconddns" sync
 fi
 
 echo ""
-echo "=== Done ==="
+echo "=== Installation complete ==="
 echo ""
-echo "How it works:"
-echo "  Domains created/deleted in CyberPanel are automatically"
-echo "  synced to your secondary DNS service via Django signals."
+echo "  Config:  $CONFIG_FILE"
+echo "  CLI:     seconddns {sync|list|add|remove} DOMAIN"
+echo "  Logs:    tail -f $LOG_FILE"
 echo ""
-echo "CLI commands (for manual use):"
-echo "  seconddns sync      — full sync of all domains"
-echo "  seconddns list      — show zones on secondary DNS"
-echo "  seconddns add X     — add domain manually"
-echo "  seconddns remove X  — remove domain manually"
-echo ""
-echo "Logs: tail -f /var/log/seconddns.log"
+echo "  Domains created/deleted in CyberPanel will be"
+echo "  automatically synced to your secondary DNS."
