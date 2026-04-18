@@ -17,7 +17,7 @@ curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyber
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed instructions.
+See [cyberpanel/INSTALL.md](cyberpanel/INSTALL.md) for detailed instructions.
 
 ## Quick Start — Monitoring
 

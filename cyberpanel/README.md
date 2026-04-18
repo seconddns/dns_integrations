@@ -1,78 +1,55 @@
 # CyberPanel Integration
 
-Automatic secondary DNS zone management for CyberPanel servers.
-
-## How It Works
-
-Hooks into CyberPanel's Django signal system (`postWebsiteCreation`, `postWebsiteDeletion`). When a domain is created or deleted in CyberPanel, the secondary DNS zone is instantly added or removed via API. No polling, no delays.
+Automatic secondary DNS zone management for CyberPanel servers. When a DNS zone is created or deleted in CyberPanel, the secondary DNS zone is instantly synced via API.
 
 ## Quick Install
 
 ```bash
-git clone https://github.com/0kaba0hub/dns_integrations.git
-cd dns_integrations/cyberpanel
-sudo bash install.sh
+curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/install.sh \
+  | bash -s -- --api-key=YOUR_API_KEY
 ```
 
-Edit `/etc/seconddns.conf`:
+That's it. The installer handles everything — config, signals, PowerDNS AXFR, systemd hook.
 
-```ini
-[seconddns]
-api_url = https://seconddns.com
-api_key = YOUR_API_KEY_HERE
-master_ip =
+See [INSTALL.md](INSTALL.md) for options, troubleshooting, and uninstall instructions.
+
+## How It Works
+
+```
+DNS zone created in CyberPanel
+       ↓
+Django signal (postZoneCreation)
+       ↓
+seconddns_plugin.py → POST /api/zones
+       ↓
+SecondDNS creates slave zone → AXFR from your master
 ```
 
-Run initial sync:
+Hooks into CyberPanel's Django signal system (`postZoneCreation`, `postSubmitZoneDeletion`). Falls back to website signals (`postWebsiteCreation`, `postWebsiteDeletion`) on older CyberPanel versions.
+
+A systemd hook re-registers signals on every lscpd restart, so updates to CyberPanel don't break the integration.
+
+## CLI Commands
 
 ```bash
-seconddns sync
+seconddns list               # Show zones on secondary DNS
+seconddns sync               # Sync all CyberPanel domains
+seconddns add example.com    # Add zone manually
+seconddns remove example.com # Remove zone manually
 ```
 
-## Usage
-
-```bash
-# Sync all existing domains
-seconddns sync
-
-# List zones on secondary DNS
-seconddns list
-
-# Manually add/remove
-seconddns add example.com
-seconddns remove example.com
-```
-
-## What Gets Installed
+## Files
 
 | File | Purpose |
-|---|---|
-| `/usr/local/bin/seconddns` | CLI script |
-| `/etc/seconddns.conf` | Configuration (API key, URL) |
-| `/usr/local/CyberCP/plogical/seconddns_plugin.py` | Django signal handlers |
+|------|---------|
+| `/usr/local/bin/seconddns` | CLI tool |
+| `/etc/seconddns.conf` | Config (API key, master IP) |
 | `/var/log/seconddns.log` | Log file |
-
-The installer also registers signal handlers in CyberPanel's startup (`ready.py`).
-
-## Logs
-
-```bash
-tail -f /var/log/seconddns.log
-```
-
-## Uninstall
-
-```bash
-sudo rm /usr/local/bin/seconddns
-sudo rm /usr/local/CyberCP/plogical/seconddns_plugin.py
-# Remove the seconddns block from /usr/local/CyberCP/CyberCP/ready.py
-sudo systemctl restart lscpd
-# Optionally: sudo rm /etc/seconddns.conf
-```
+| `/usr/local/CyberCP/plogical/seconddns_plugin.py` | Signal plugin |
+| `/etc/systemd/system/seconddns-signals.service` | Update resilience hook |
 
 ## Requirements
 
-- Python 3.6+ (ships with CyberPanel)
-- CyberPanel 2.x+
-- Network access to secondary DNS API
-- Primary DNS configured to allow AXFR from secondary DNS server IP
+- CyberPanel 2.x+ with PowerDNS
+- Root access
+- SecondDNS API key ([get one here](https://seconddns.com/dashboard/api-key))
