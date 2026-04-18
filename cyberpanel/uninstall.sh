@@ -17,7 +17,11 @@ done
 
 confirm() {
     [ "$AUTO_YES" -eq 1 ] && return 0
-    read -p "$1 [y/N] " -n 1 -r < /dev/tty 2>/dev/null || return 1
+    if [ ! -t 0 ] && [ ! -e /dev/tty ]; then
+        echo "[!] No interactive terminal. Use --yes to skip prompts."
+        exit 1
+    fi
+    read -p "$1 [y/N] " -n 1 -r < /dev/tty
     echo
     [[ $REPLY =~ ^[Yy]$ ]]
 }
