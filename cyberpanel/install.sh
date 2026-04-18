@@ -70,9 +70,9 @@ confirm() {
         echo "[!] No interactive terminal. Use --yes to skip prompts."
         exit 1
     fi
-    read -p "$1 [y/N] " -n 1 -r < /dev/tty
+    read -p "$1 [Y/n] " -n 1 -r < /dev/tty
     echo
-    [[ $REPLY =~ ^[Yy]$ ]]
+    [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
 echo "=== SecondDNS CyberPanel Integration ==="
@@ -255,10 +255,22 @@ else
     echo "[!] pdns.conf not found — configure AXFR manually"
 fi
 
-# Initial sync
-echo ""
-if confirm "Sync existing domains now?"; then
-    "$INSTALL_DIR/seconddns" sync
+# Initial sync — check CyberPanel domains, ask if any exist
+DOMAIN_COUNT=$(python3 -c "
+import sys; sys.path.insert(0, '/usr/local/CyberCP')
+try:
+    import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'CyberCP.settings')
+    import django; django.setup()
+    from websiteFunctions.models import Websites
+    print(Websites.objects.count())
+except: print(0)
+" 2>/dev/null || echo "0")
+
+if [ "$DOMAIN_COUNT" -gt 0 ]; then
+    echo ""
+    if confirm "Found $DOMAIN_COUNT domains. Sync to secondary DNS now?"; then
+        "$INSTALL_DIR/seconddns" sync
+    fi
 fi
 
 echo ""
