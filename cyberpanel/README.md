@@ -27,7 +27,14 @@ SecondDNS creates slave zone → AXFR from your master
 
 Hooks into CyberPanel's Django signal system (`postZoneCreation`, `postSubmitZoneDeletion`). Falls back to website signals (`postWebsiteCreation`, `postWebsiteDeletion`) on older CyberPanel versions.
 
-A systemd hook re-registers signals on every lscpd restart, so updates to CyberPanel don't break the integration.
+## CyberPanel Update Resilience
+
+CyberPanel updates can overwrite `wsgi.py` and remove our signal hooks. To handle this, the installer adds a systemd service (`seconddns-signals.service`) that is bound to `lscpd.service`. On every lscpd restart — including after CyberPanel updates — it automatically:
+
+1. Cleans any duplicate signal blocks
+2. Re-registers exactly one signal block in `wsgi.py`
+
+No manual intervention needed.
 
 ## CLI Commands
 
