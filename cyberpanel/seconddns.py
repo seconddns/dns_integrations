@@ -308,25 +308,30 @@ def on_zone_deleted(sender, **kwargs):
 _signals_registered = False
 
 def register_signals():
-    """Connect to CyberPanel DNS zone signals (once per process)."""
+    """Connect to CyberPanel signals — both website and DNS zone hooks."""
     global _signals_registered
     if _signals_registered:
         return
+    hooks = []
+    try:
+        from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
+        postWebsiteCreation.connect(on_zone_created, dispatch_uid="seconddns_website_create")
+        postWebsiteDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_website_delete")
+        hooks.append("website")
+    except ImportError:
+        pass
     try:
         from dns.signals import postZoneCreation, postSubmitZoneDeletion
-        postZoneCreation.connect(on_zone_created, dispatch_uid="seconddns_create")
-        postSubmitZoneDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_delete")
-        _signals_registered = True
-        logger.info("SecondDNS signals registered (dns zone hooks).")
+        postZoneCreation.connect(on_zone_created, dispatch_uid="seconddns_dns_create")
+        postSubmitZoneDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_dns_delete")
+        hooks.append("dns zone")
     except ImportError:
-        try:
-            from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
-            postWebsiteCreation.connect(on_zone_created, dispatch_uid="seconddns_create")
-            postWebsiteDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_delete")
-            _signals_registered = True
-            logger.info("SecondDNS signals registered (website hooks fallback).")
-        except ImportError:
-            logger.warning("CyberPanel signals not available.")
+        pass
+    if hooks:
+        _signals_registered = True
+        logger.info("SecondDNS signals registered (%s hooks).", " + ".join(hooks))
+    else:
+        logger.warning("CyberPanel signals not available.")
 
 
 SIGNAL_BLOCK = """
