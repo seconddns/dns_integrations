@@ -103,8 +103,8 @@ API_DNS_IPS=$(curl -sf --max-time 10 \
     "$API_URL/api/server-info" 2>/dev/null | \
     python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
 
-API_HAS_V4=$(echo "$API_DNS_IPS" | tr ',' '\n' | grep -v ':' | head -1)
-API_HAS_V6=$(echo "$API_DNS_IPS" | tr ',' '\n' | grep ':' | head -1)
+API_HAS_V4=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep -v ':' | grep -v '^$' | head -1)
+API_HAS_V6=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep ':' | head -1)
 
 # Intersect: offer only protocols both server and API support
 CAN_V4="" ; [ -n "$SERVER_V4" ] && [ -n "$API_HAS_V4" ] && CAN_V4=1
@@ -115,12 +115,15 @@ if [ -n "$CAN_V4" ] && [ -n "$CAN_V6" ]; then
     echo "[+] Both protocols available:"
     echo "    1) IPv4: server $SERVER_V4 ↔ secondary $API_HAS_V4"
     echo "    2) IPv6: server $SERVER_V6 ↔ secondary $API_HAS_V6"
-    read -p "    Choose [1]: " -n 1 -r < /dev/tty
-    echo
-    case $REPLY in
-        2) IP_PREFERENCE="v6" ;;
-        *) IP_PREFERENCE="v4" ;;
-    esac
+    while true; do
+        read -p "    Choose (1 or 2): " -n 1 -r < /dev/tty
+        echo
+        case $REPLY in
+            1) IP_PREFERENCE="v4"; break ;;
+            2) IP_PREFERENCE="v6"; break ;;
+            *) echo "    Please enter 1 or 2" ;;
+        esac
+    done
 elif [ -n "$CAN_V6" ]; then
     IP_PREFERENCE="v6"
 elif [ -n "$CAN_V4" ]; then
