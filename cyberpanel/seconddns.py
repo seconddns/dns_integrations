@@ -226,7 +226,7 @@ def cmd_list(config):
 
 def _extract_domain(request, response=None):
     """Extract domain name from CyberPanel request/response."""
-    keys = ("domainName", "domain", "websiteName")
+    keys = ("domainName", "domain", "websiteName", "zoneDomain", "selectedZone")
 
     # 1. Try request.body (JSON) — CyberPanel uses json.loads(request.body) in views
     if hasattr(request, "body") and request.body:
