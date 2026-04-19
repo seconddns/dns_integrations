@@ -3,6 +3,7 @@
 ## Requirements
 
 - CyberPanel 2.x+ with PowerDNS
+- `git` installed
 - Root access
 - SecondDNS API key — [get one here](https://seconddns.com/dashboard/api-key)
 
