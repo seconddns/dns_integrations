@@ -267,6 +267,21 @@ def _extract_domain(request, response=None):
     return ""
 
 
+def _set_zone_master(domain):
+    """Change zone type from NATIVE to MASTER so AXFR works."""
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE domains SET type='MASTER' WHERE name=%s AND type='NATIVE'",
+                [domain]
+            )
+            if cursor.rowcount > 0:
+                logger.info("Zone %s: type changed NATIVE -> MASTER", domain)
+    except Exception as e:
+        logger.warning("Could not update zone type for %s: %s", domain, e)
+
+
 def on_zone_created(sender, **kwargs):
     """Signal receiver for DNS zone creation."""
     try:
@@ -278,6 +293,7 @@ def on_zone_created(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Zone created: %s", domain)
+        _set_zone_master(domain)
         config = load_config()
         if config:
             add_zone(config, domain)
