@@ -6,7 +6,6 @@ set -e
 #   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
 #   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
 
-REPO_RAW="https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_FILE="/etc/seconddns.conf"
 CYBERPANEL_DIR="/usr/local/CyberCP"
@@ -48,21 +47,24 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# Detect if running from repo clone or curl pipe
-LOCAL_MODE=0
-[ -f "seconddns.py" ] && LOCAL_MODE=1
+# Clone repo to temp dir for fresh files
+REPO_URL="https://github.com/0kaba0hub/dns_integrations.git"
+WORK_DIR=$(mktemp -d)
+CYBER_SRC="$WORK_DIR/dns_integrations/cyberpanel"
 
-download_file() {
-    local file="$1" dest="$2"
-    if [ "$LOCAL_MODE" -eq 1 ] && [ -f "$file" ]; then
-        cp "$file" "$dest"
-    else
-        curl -sf --max-time 30 -o "$dest" "${REPO_RAW}/${file}" || {
-            echo "[!] Failed to download $file"
-            exit 1
-        }
-    fi
-}
+if [ -f "seconddns.py" ]; then
+    # Running from local clone
+    CYBER_SRC="$(cd "$(dirname "$0")" && pwd)"
+else
+    echo "[*] Downloading latest version..."
+    git clone --depth 1 -q "$REPO_URL" "$WORK_DIR/dns_integrations" || {
+        echo "[!] Failed to clone repository"
+        exit 1
+    }
+fi
+
+cleanup() { [ -d "$WORK_DIR" ] && rm -rf "$WORK_DIR"; }
+trap cleanup EXIT
 
 confirm() {
     [ "$AUTO_YES" -eq 1 ] && return 0
@@ -148,7 +150,7 @@ fi
 
 # Install CLI
 echo ""
-download_file "seconddns.py" "$INSTALL_DIR/seconddns"
+cp "$CYBER_SRC/seconddns.py" "$INSTALL_DIR/seconddns"
 chmod +x "$INSTALL_DIR/seconddns"
 echo "[+] Installed CLI to $INSTALL_DIR/seconddns"
 
@@ -173,7 +175,7 @@ echo "[+] Log file: $LOG_FILE"
 
 # Install CyberPanel plugin
 if [ -d "$CYBERPANEL_DIR" ]; then
-    download_file "seconddns.py" "$PLUGIN_FILE"
+    cp "$CYBER_SRC/seconddns.py" "$PLUGIN_FILE"
     echo "[+] Installed plugin to $PLUGIN_FILE"
 
     # Clean and register signals
@@ -211,7 +213,7 @@ with open(p, 'w') as f: f.write(c)
 
     # Systemd hook
     SYSTEMD_SERVICE="/etc/systemd/system/seconddns-signals.service"
-    download_file "seconddns-signals.service" "$SYSTEMD_SERVICE"
+    cp "$CYBER_SRC/seconddns-signals.service" "$SYSTEMD_SERVICE"
     systemctl daemon-reload
     systemctl enable seconddns-signals.service 2>/dev/null
     echo "[+] Systemd hook installed (survives CyberPanel updates)"
