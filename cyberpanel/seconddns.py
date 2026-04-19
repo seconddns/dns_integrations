@@ -267,6 +267,21 @@ def _extract_domain(request, response=None):
     return ""
 
 
+def _set_zone_master(domain):
+    """Change zone type from NATIVE to MASTER so AXFR works."""
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE domains SET type='MASTER' WHERE name=%s AND type='NATIVE'",
+                [domain]
+            )
+            if cursor.rowcount > 0:
+                logger.info("Zone %s: type changed NATIVE -> MASTER", domain)
+    except Exception as e:
+        logger.warning("Could not update zone type for %s: %s", domain, e)
+
+
 def on_zone_created(sender, **kwargs):
     """Signal receiver for DNS zone creation."""
     try:
@@ -278,6 +293,7 @@ def on_zone_created(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Zone created: %s", domain)
+        _set_zone_master(domain)
         config = load_config()
         if config:
             add_zone(config, domain)
@@ -286,8 +302,17 @@ def on_zone_created(sender, **kwargs):
     return 200
 
 
-def on_zone_deleted(sender, **kwargs):
-    """Signal receiver for DNS zone deletion."""
+def _domain_has_website(domain):
+    """Check if domain belongs to an existing website in CyberPanel."""
+    try:
+        from websiteFunctions.models import Websites
+        return Websites.objects.filter(domain=domain).exists()
+    except Exception:
+        return False
+
+
+def on_website_deleted(sender, **kwargs):
+    """Website deletion — always remove from secondary DNS."""
     try:
         request = kwargs.get("request")
         response = kwargs.get("response")
@@ -296,12 +321,34 @@ def on_zone_deleted(sender, **kwargs):
         domain = _extract_domain(request, response)
         if not domain:
             return 200
-        logger.info("Zone deleted: %s", domain)
+        logger.info("Website deleted: %s", domain)
         config = load_config()
         if config:
             remove_zone(config, domain)
     except Exception as e:
-        logger.error("Signal handler error (delete): %s", e)
+        logger.error("Signal handler error (website delete): %s", e)
+    return 200
+
+
+def on_dns_zone_deleted(sender, **kwargs):
+    """DNS zone deletion — only remove if domain has no website."""
+    try:
+        request = kwargs.get("request")
+        response = kwargs.get("response")
+        if not request:
+            return 200
+        domain = _extract_domain(request, response)
+        if not domain:
+            return 200
+        if _domain_has_website(domain):
+            logger.info("DNS zone deleted but website exists for %s — keeping on secondary", domain)
+            return 200
+        logger.info("DNS zone deleted: %s", domain)
+        config = load_config()
+        if config:
+            remove_zone(config, domain)
+    except Exception as e:
+        logger.error("Signal handler error (dns zone delete): %s", e)
     return 200
 
 
@@ -316,14 +363,14 @@ def register_signals():
     try:
         from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
         postWebsiteCreation.connect(on_zone_created, dispatch_uid="seconddns_website_create")
-        postWebsiteDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_website_delete")
+        postWebsiteDeletion.connect(on_website_deleted, dispatch_uid="seconddns_website_delete")
         hooks.append("website")
     except ImportError:
         pass
     try:
         from dns.signals import postZoneCreation, postSubmitZoneDeletion
         postZoneCreation.connect(on_zone_created, dispatch_uid="seconddns_dns_create")
-        postSubmitZoneDeletion.connect(on_zone_deleted, dispatch_uid="seconddns_dns_delete")
+        postSubmitZoneDeletion.connect(on_dns_zone_deleted, dispatch_uid="seconddns_dns_delete")
         hooks.append("dns zone")
     except ImportError:
         pass
