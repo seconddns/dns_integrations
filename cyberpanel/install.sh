@@ -154,7 +154,10 @@ cp "$CYBER_SRC/seconddns.py" "$INSTALL_DIR/seconddns"
 chmod +x "$INSTALL_DIR/seconddns"
 echo "[+] Installed CLI to $INSTALL_DIR/seconddns"
 
-# Create config
+# Create or update config
+if [ -f "$CONFIG_FILE" ]; then
+    echo "[=] Config exists at $CONFIG_FILE — updating"
+fi
 cat > "$CONFIG_FILE" << EOF
 [seconddns]
 api_url = $API_URL
