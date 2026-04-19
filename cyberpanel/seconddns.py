@@ -268,7 +268,7 @@ def _extract_domain(request, response=None):
 
 
 def _set_zone_master(domain):
-    """Change zone type from NATIVE to MASTER so AXFR works."""
+    """Change zone type from NATIVE to MASTER and notify secondaries."""
     try:
         from django.db import connection
         with connection.cursor() as cursor:
@@ -278,6 +278,11 @@ def _set_zone_master(domain):
             )
             if cursor.rowcount > 0:
                 logger.info("Zone %s: type changed NATIVE -> MASTER", domain)
+                subprocess.run(
+                    ["pdns_control", "notify", domain],
+                    capture_output=True, timeout=5
+                )
+                logger.info("Zone %s: NOTIFY sent to secondaries", domain)
     except Exception as e:
         logger.warning("Could not update zone type for %s: %s", domain, e)
 
