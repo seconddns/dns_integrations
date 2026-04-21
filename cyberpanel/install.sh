@@ -176,13 +176,6 @@ fi
 chmod 664 "$LOG_FILE"
 echo "[+] Log file: $LOG_FILE"
 
-# Sudoers for pdns_control notify (cyberpanel user has no access to control socket)
-if id cyberpanel &>/dev/null; then
-    echo 'cyberpanel ALL=(root) NOPASSWD: /usr/bin/pdns_control notify *' > /etc/sudoers.d/seconddns
-    chmod 440 /etc/sudoers.d/seconddns
-    echo "[+] Sudoers configured for pdns_control notify"
-fi
-
 # Install CyberPanel plugin
 if [ -d "$CYBERPANEL_DIR" ]; then
     cp "$CYBER_SRC/seconddns.py" "$PLUGIN_FILE"

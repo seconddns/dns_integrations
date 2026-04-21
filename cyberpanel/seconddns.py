@@ -319,11 +319,6 @@ def on_zone_created(sender, **kwargs):
         config = load_config()
         if config:
             add_zone(config, domain)
-        subprocess.run(
-            ["sudo", "pdns_control", "notify", domain],
-            capture_output=True, timeout=5
-        )
-        logger.info("Zone %s: NOTIFY sent to secondaries", domain)
     except Exception as e:
         logger.error("Signal handler error (create): %s", e)
     return 200
