@@ -299,6 +299,14 @@ def on_zone_created(sender, **kwargs):
             return 200
         logger.info("Zone created: %s", domain)
         _set_zone_master(domain)
+        try:
+            subprocess.run(
+                ["pdnsutil", "increase-serial", domain],
+                capture_output=True, timeout=5
+            )
+            logger.info("Zone %s: SOA serial updated to YYYYMMDDNN format", domain)
+        except Exception as e:
+            logger.warning("Could not update SOA serial for %s: %s", domain, e)
         config = load_config()
         if config:
             add_zone(config, domain)
