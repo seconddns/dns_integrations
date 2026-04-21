@@ -272,12 +272,17 @@ if [ -n "$PDNS_CONF" ]; then
             echo "[!] also-notify is not configured"
             ISSUES=$((ISSUES+1))
         fi
+        if ! grep -qE "^default-soa-edit=INCEPTION-INCREMENT" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] default-soa-edit=INCEPTION-INCREMENT is missing (SOA serial format YYYYMMDDNN)"
+            ISSUES=$((ISSUES+1))
+        fi
 
         if [ "$ISSUES" -gt 0 ]; then
             if confirm "Apply fixes automatically? (backup will be created)"; then
                 cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
 
                 grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
+                grep -qE "^default-soa-edit=" "$PDNS_CONF" || echo "default-soa-edit=INCEPTION-INCREMENT" >> "$PDNS_CONF"
 
                 if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
                     grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" || \
