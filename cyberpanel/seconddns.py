@@ -295,18 +295,32 @@ def on_zone_created(sender, **kwargs):
         logger.info("Zone created: %s", domain)
         _set_zone_master(domain)
         try:
-            subprocess.run(
-                ["pdnsutil", "increase-serial", domain],
-                capture_output=True, timeout=5
-            )
-            logger.info("Zone %s: SOA serial updated to YYYYMMDDNN format", domain)
+            from django.db import connection
+            from datetime import date
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT content FROM records WHERE name=%s AND type='SOA'", [domain]
+                )
+                row = cursor.fetchone()
+                if row:
+                    parts = row[0].split()
+                    current_serial = int(parts[2])
+                    today_base = int(date.today().strftime("%Y%m%d")) * 100
+                    if current_serial < today_base or current_serial >= today_base + 100:
+                        new_serial = today_base + 1
+                        parts[2] = str(new_serial)
+                        cursor.execute(
+                            "UPDATE records SET content=%s WHERE name=%s AND type='SOA'",
+                            [" ".join(parts), domain]
+                        )
+                        logger.info("Zone %s: SOA serial %d -> %d", domain, current_serial, new_serial)
         except Exception as e:
             logger.warning("Could not update SOA serial for %s: %s", domain, e)
         config = load_config()
         if config:
             add_zone(config, domain)
         subprocess.run(
-            ["pdns_control", "notify", domain],
+            ["sudo", "pdns_control", "notify", domain],
             capture_output=True, timeout=5
         )
         logger.info("Zone %s: NOTIFY sent to secondaries", domain)
