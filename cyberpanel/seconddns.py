@@ -147,7 +147,7 @@ def remove_zone(config, domain):
     logger.info("[-] Removing zone: %s", domain)
     result = api_request(config, "DELETE", f"/api/zones/{zone['id']}")
     if result and result.get("_status"):
-        logger.error("    Error: %s", result.get("error", "Unknown"))
+        logger.error("    Error (%s): %s", result.get("_status"), result.get("error", str(result)))
         return False
     logger.info("    Done.")
     return True
