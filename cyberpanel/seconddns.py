@@ -383,10 +383,12 @@ def register_signals():
         return
     hooks = []
     try:
-        from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion
+        from websiteFunctions.signals import postWebsiteCreation, postWebsiteDeletion, postDomainCreation, postDomainDeletion
         postWebsiteCreation.connect(on_zone_created, dispatch_uid="seconddns_website_create")
         postWebsiteDeletion.connect(on_website_deleted, dispatch_uid="seconddns_website_delete")
-        hooks.append("website")
+        postDomainCreation.connect(on_zone_created, dispatch_uid="seconddns_addon_create")
+        postDomainDeletion.connect(on_website_deleted, dispatch_uid="seconddns_addon_delete")
+        hooks.append("website + addon")
     except ImportError:
         pass
     try:
