@@ -68,15 +68,67 @@ curl -sf --max-time 10 \
     exit 1
 }
 
-# Detect server IP
+# Detect server IPs
+SERVER_V4=$(curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+SERVER_V6=$(curl -6 -sf --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+
+# Get secondary DNS IPs from API
+API_DNS_IPS=$(curl -sf --max-time 10 \
+    -H "X-API-Key: $API_KEY" \
+    -H "User-Agent: SecondDNS-Installer/1.0" \
+    "$API_URL/api/server-info" 2>/dev/null | \
+    python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
+
+API_HAS_V4=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep -v ':' | grep -v '^$' | head -1)
+API_HAS_V6=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep ':' | head -1)
+
+# Determine available protocols
+CAN_V4="" ; [ -n "$SERVER_V4" ] && [ -n "$API_HAS_V4" ] && CAN_V4=1
+CAN_V6="" ; [ -n "$SERVER_V6" ] && [ -n "$API_HAS_V6" ] && CAN_V6=1
+
+IP_PREFERENCE=""
+if [ -n "$CAN_V4" ] && [ -n "$CAN_V6" ]; then
+    echo "[+] Both protocols available:"
+    echo "    1) IPv4: server $SERVER_V4 ↔ secondary $API_HAS_V4"
+    echo "    2) IPv6: server $SERVER_V6 ↔ secondary $API_HAS_V6"
+    while true; do
+        read -p "    Choose (1 or 2): " -n 1 -r < /dev/tty
+        echo
+        case $REPLY in
+            1) IP_PREFERENCE="v4"; break ;;
+            2) IP_PREFERENCE="v6"; break ;;
+            *) echo "    Please enter 1 or 2" ;;
+        esac
+    done
+elif [ -n "$CAN_V6" ]; then
+    IP_PREFERENCE="v6"
+elif [ -n "$CAN_V4" ]; then
+    IP_PREFERENCE="v4"
+fi
+
+# Set master IP based on preference
 if [ -z "$MASTER_IP" ]; then
-    MASTER_IP=$(curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+    if [ "$IP_PREFERENCE" = "v6" ]; then
+        MASTER_IP="$SERVER_V6"
+    elif [ "$IP_PREFERENCE" = "v4" ]; then
+        MASTER_IP="$SERVER_V4"
+    fi
+
     if [ -n "$MASTER_IP" ]; then
-        echo "[+] Detected server IP: $MASTER_IP"
+        echo "[+] Master IP: $MASTER_IP"
     else
-        echo "[!] Could not auto-detect server IP"
+        echo "[!] Could not auto-detect master IP"
         read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
     fi
+fi
+
+# Set secondary DNS IP based on preference
+if [ "$IP_PREFERENCE" = "v6" ] && [ -n "$API_HAS_V6" ]; then
+    DNS_IPS="$API_HAS_V6"
+elif [ -n "$API_HAS_V4" ]; then
+    DNS_IPS="$API_HAS_V4"
+else
+    DNS_IPS="$API_DNS_IPS"
 fi
 
 # Check DirectAdmin
@@ -117,19 +169,9 @@ done
 echo ""
 echo "--- DNS Server detection & AXFR configuration ---"
 
-# Get secondary DNS IPs from API
-DNS_IPS=$(curl -sf --max-time 10 \
-    -H "X-API-Key: $API_KEY" \
-    -H "User-Agent: SecondDNS-Installer/1.0" \
-    "$API_URL/api/server-info" 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
-
 if [ -z "$DNS_IPS" ]; then
-    echo "[!] Could not fetch secondary DNS IPs from API"
-    read -p "    Enter secondary DNS IP: " DNS_IPS < /dev/tty
+    echo "[!] No secondary DNS IP — skipping AXFR config"
 fi
-
-[ -z "$DNS_IPS" ] && { echo "[!] No secondary DNS IP — skipping AXFR config"; }
 
 if [ -n "$DNS_IPS" ]; then
     echo "[+] Secondary DNS IP: $DNS_IPS"
@@ -165,6 +207,41 @@ if [ -n "$DNS_IPS" ]; then
     if [ -z "$DNS_SERVER" ]; then
         echo "[!] Could not detect DNS server (neither PowerDNS nor BIND/named found)"
         echo "    Configure AXFR manually to allow transfers to $SECONDARY_IP"
+    fi
+
+    # Check if chosen protocol is supported by DNS server
+    if [ -n "$NAMED_CONF" ]; then
+        NAMED_OPTIONS=""
+        for f in /etc/named.conf.options /etc/bind/named.conf.options; do
+            [ -f "$f" ] && NAMED_OPTIONS="$f" && break
+        done
+        [ -z "$NAMED_OPTIONS" ] && NAMED_OPTIONS="$NAMED_CONF"
+
+        if [ "$IP_PREFERENCE" = "v6" ]; then
+            if grep -q "listen-on-v6" "$NAMED_OPTIONS" 2>/dev/null; then
+                if grep -q 'listen-on-v6.*none' "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] WARNING: BIND has listen-on-v6 set to none — IPv6 disabled"
+                    echo "    Secondary DNS won't be able to reach this server via IPv6"
+                fi
+            fi
+        elif [ "$IP_PREFERENCE" = "v4" ]; then
+            if grep -q 'listen-on\s' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
+                if grep -q 'listen-on.*none' "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] WARNING: BIND has listen-on set to none — IPv4 disabled"
+                fi
+            fi
+        fi
+    fi
+
+    if [ -n "$PDNS_CONF" ]; then
+        PDNS_LOCAL=$(grep "^local-address=" "$PDNS_CONF" 2>/dev/null | sed 's/^local-address=//')
+        if [ -n "$PDNS_LOCAL" ]; then
+            if [ "$IP_PREFERENCE" = "v6" ] && ! echo "$PDNS_LOCAL" | grep -q ':'; then
+                echo "[!] WARNING: PowerDNS local-address has no IPv6 — only listening on $PDNS_LOCAL"
+            elif [ "$IP_PREFERENCE" = "v4" ] && ! echo "$PDNS_LOCAL" | grep -qE '^[0-9]'; then
+                echo "[!] WARNING: PowerDNS local-address has no IPv4 — only listening on $PDNS_LOCAL"
+            fi
+        fi
     fi
 
     # --- PowerDNS configuration ---
@@ -257,7 +334,16 @@ if [ -n "$DNS_IPS" ]; then
             fi
 
             # Check also-notify
-            if ! grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
+            if grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
+                if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] also-notify does not include $SECONDARY_IP"
+                    if confirm "Add $SECONDARY_IP to also-notify?"; then
+                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                        echo "[+] Added $SECONDARY_IP to also-notify"
+                    fi
+                fi
+            else
                 if confirm "Add also-notify for $SECONDARY_IP?"; then
                     sed -i "/^options\s*{/,/^};/ {
                         /^};/ i\\
