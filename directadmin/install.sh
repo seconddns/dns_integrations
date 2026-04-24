@@ -257,7 +257,15 @@ if [ -n "$DNS_IPS" ]; then
             fi
 
             # Check also-notify
-            if ! grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
+            if grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
+                if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] also-notify does not include $SECONDARY_IP"
+                    if confirm "Add $SECONDARY_IP to also-notify?"; then
+                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        echo "[+] Added $SECONDARY_IP to also-notify"
+                    fi
+                fi
+            else
                 if confirm "Add also-notify for $SECONDARY_IP?"; then
                     sed -i "/^options\s*{/,/^};/ {
                         /^};/ i\\
