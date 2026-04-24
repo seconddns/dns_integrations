@@ -19,7 +19,7 @@ MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
 
 # Skip non-zone events
 case "$caller" in
-    create:zone|create:domain) ;;
+    create:zone|create:domain|create:pointer) ;;
     *) exit 0 ;;
 esac
 
