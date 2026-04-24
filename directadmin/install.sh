@@ -262,6 +262,7 @@ if [ -n "$DNS_IPS" ]; then
                     echo "[!] also-notify does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to also-notify?"; then
                         sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to also-notify"
                     fi
                 fi
