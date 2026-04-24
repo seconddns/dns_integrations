@@ -113,9 +113,9 @@ for hook in dns_create_post.sh dns_delete_post.sh; do
     echo "[+] Installed hook: $HOOKS_DIR/$hook"
 done
 
-# PowerDNS / named AXFR check
+# --- Detect DNS server and configure AXFR ---
 echo ""
-echo "--- DNS Server AXFR check ---"
+echo "--- DNS Server detection & AXFR configuration ---"
 
 # Get secondary DNS IPs from API
 DNS_IPS=$(curl -sf --max-time 10 \
@@ -124,19 +124,157 @@ DNS_IPS=$(curl -sf --max-time 10 \
     "$API_URL/api/server-info" 2>/dev/null | \
     python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
 
+if [ -z "$DNS_IPS" ]; then
+    echo "[!] Could not fetch secondary DNS IPs from API"
+    read -p "    Enter secondary DNS IP: " DNS_IPS < /dev/tty
+fi
+
+[ -z "$DNS_IPS" ] && { echo "[!] No secondary DNS IP — skipping AXFR config"; }
+
 if [ -n "$DNS_IPS" ]; then
-    echo "[+] Secondary DNS IPs: $DNS_IPS"
-    echo ""
-    echo "    Make sure your DNS server allows AXFR from these IPs."
-    echo "    For BIND/named, add to zone config:"
-    echo "      allow-transfer { ${DNS_IPS%%,*}; };"
-    echo "      also-notify { ${DNS_IPS%%,*}; };"
-    echo ""
-    echo "    For PowerDNS, add to pdns.conf:"
-    echo "      allow-axfr-ips=${DNS_IPS}"
-    echo "      also-notify=${DNS_IPS}"
-else
-    echo "[!] Could not fetch secondary DNS IPs"
+    echo "[+] Secondary DNS IP: $DNS_IPS"
+    SECONDARY_IP="${DNS_IPS%%,*}"
+
+    # Detect which DNS server is running
+    DNS_SERVER=""
+    PDNS_CONF=""
+    NAMED_CONF=""
+
+    # Check DirectAdmin CustomBuild config
+    if [ -f "/usr/local/directadmin/custombuild/options.conf" ]; then
+        DA_DNS=$(grep "^dns=" /usr/local/directadmin/custombuild/options.conf 2>/dev/null | cut -d= -f2)
+        echo "[=] DirectAdmin CustomBuild dns=$DA_DNS"
+    fi
+
+    # Detect PowerDNS
+    if command -v pdns_server &>/dev/null || systemctl is-active pdns &>/dev/null 2>&1; then
+        DNS_SERVER="powerdns"
+        for f in /etc/pdns/pdns.conf /etc/powerdns/pdns.conf /etc/pdns.conf; do
+            [ -f "$f" ] && PDNS_CONF="$f" && break
+        done
+    fi
+
+    # Detect BIND/named
+    if command -v named &>/dev/null || systemctl is-active named &>/dev/null 2>&1; then
+        DNS_SERVER="${DNS_SERVER:+$DNS_SERVER+}named"
+        for f in /etc/named.conf /etc/bind/named.conf /etc/named/named.conf; do
+            [ -f "$f" ] && NAMED_CONF="$f" && break
+        done
+    fi
+
+    if [ -z "$DNS_SERVER" ]; then
+        echo "[!] Could not detect DNS server (neither PowerDNS nor BIND/named found)"
+        echo "    Configure AXFR manually to allow transfers to $SECONDARY_IP"
+    fi
+
+    # --- PowerDNS configuration ---
+    if [ -n "$PDNS_CONF" ]; then
+        echo "[=] Detected PowerDNS: $PDNS_CONF"
+        ISSUES=0
+
+        if ! grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] master=yes is missing"
+            ISSUES=$((ISSUES+1))
+        fi
+        if ! grep -qE "^allow-axfr-ips=.*$SECONDARY_IP" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] allow-axfr-ips does not include $SECONDARY_IP"
+            ISSUES=$((ISSUES+1))
+        fi
+        if ! grep -qE "^also-notify=.*$SECONDARY_IP" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] also-notify does not include $SECONDARY_IP"
+            ISSUES=$((ISSUES+1))
+        fi
+        if ! grep -qE "^default-soa-edit=INCEPTION-INCREMENT" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] default-soa-edit=INCEPTION-INCREMENT is missing"
+            ISSUES=$((ISSUES+1))
+        fi
+
+        if [ "$ISSUES" -gt 0 ]; then
+            if confirm "Apply PowerDNS fixes automatically? (backup will be created)"; then
+                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+
+                grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
+                grep -qE "^default-soa-edit=" "$PDNS_CONF" || echo "default-soa-edit=INCEPTION-INCREMENT" >> "$PDNS_CONF"
+
+                if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
+                    grep -qE "^allow-axfr-ips=.*$SECONDARY_IP" "$PDNS_CONF" || \
+                        sed -i "s|^allow-axfr-ips=\(.*\)|allow-axfr-ips=\1,$DNS_IPS|" "$PDNS_CONF"
+                else
+                    echo "allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS" >> "$PDNS_CONF"
+                fi
+
+                if grep -qE "^also-notify=" "$PDNS_CONF"; then
+                    grep -qE "^also-notify=.*$SECONDARY_IP" "$PDNS_CONF" || \
+                        sed -i "s|^also-notify=\(.*\)|also-notify=\1,$DNS_IPS|" "$PDNS_CONF"
+                else
+                    echo "also-notify=$DNS_IPS" >> "$PDNS_CONF"
+                fi
+
+                systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                echo "[+] PowerDNS configured and restarted"
+            fi
+        else
+            echo "[+] PowerDNS AXFR config OK"
+        fi
+    fi
+
+    # --- BIND/named configuration ---
+    if [ -n "$NAMED_CONF" ]; then
+        echo "[=] Detected BIND/named: $NAMED_CONF"
+
+        # Check named.conf.options or named.conf for allow-transfer
+        NAMED_OPTIONS=""
+        for f in /etc/named.conf.options /etc/bind/named.conf.options "$NAMED_CONF"; do
+            [ -f "$f" ] && NAMED_OPTIONS="$f" && break
+        done
+
+        if [ -n "$NAMED_OPTIONS" ]; then
+            if grep -q "allow-transfer" "$NAMED_OPTIONS" 2>/dev/null; then
+                if grep -q "$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[+] BIND allow-transfer already includes $SECONDARY_IP"
+                else
+                    echo "[!] BIND allow-transfer does not include $SECONDARY_IP"
+                    if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
+                        cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        echo "[+] Added $SECONDARY_IP to allow-transfer"
+                    fi
+                fi
+            else
+                echo "[!] No allow-transfer directive found"
+                if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
+                    cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+                    # Add before closing }; of options block
+                    sed -i "/^options\s*{/,/^};/ {
+                        /^};/ i\\
+\\tallow-transfer { $SECONDARY_IP; };\\
+\\talso-notify { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
+                    echo "[+] Added allow-transfer and also-notify"
+                fi
+            fi
+
+            # Check also-notify
+            if ! grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
+                if confirm "Add also-notify for $SECONDARY_IP?"; then
+                    sed -i "/^options\s*{/,/^};/ {
+                        /^};/ i\\
+\\talso-notify { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
+                    echo "[+] Added also-notify"
+                fi
+            fi
+
+            # Reload named
+            if confirm "Reload named to apply changes?"; then
+                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || service named reload 2>/dev/null
+                echo "[+] named reloaded"
+            fi
+        else
+            echo "[!] Could not find named options file"
+            echo "    Add manually: allow-transfer { $SECONDARY_IP; }; also-notify { $SECONDARY_IP; };"
+        fi
+    fi
 fi
 
 # Initial sync
