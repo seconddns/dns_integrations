@@ -11,23 +11,27 @@ DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/develope
 
 Zone data is transferred via AXFR from your DirectAdmin server to the SecondDNS secondary nameserver.
 
+## Tested on
+
+- DirectAdmin 1.699 with BIND/named on Ubuntu 22.04
+
 ## Requirements
 
-- DirectAdmin with BIND/named or PowerDNS
+- DirectAdmin 1.6+ with BIND/named or PowerDNS
 - Root access
 - SecondDNS API key — [get one here](https://seconddns.com/dashboard/api-key)
 
 ## Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/install.sh \
+curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/install.sh?t=$(date +%s)" \
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
 ## Uninstall
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/uninstall.sh \
+curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/uninstall.sh?t=$(date +%s)" \
   | bash
 ```
 
