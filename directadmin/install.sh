@@ -209,6 +209,41 @@ if [ -n "$DNS_IPS" ]; then
         echo "    Configure AXFR manually to allow transfers to $SECONDARY_IP"
     fi
 
+    # Check if chosen protocol is supported by DNS server
+    if [ -n "$NAMED_CONF" ]; then
+        NAMED_OPTIONS=""
+        for f in /etc/named.conf.options /etc/bind/named.conf.options; do
+            [ -f "$f" ] && NAMED_OPTIONS="$f" && break
+        done
+        [ -z "$NAMED_OPTIONS" ] && NAMED_OPTIONS="$NAMED_CONF"
+
+        if [ "$IP_PREFERENCE" = "v6" ]; then
+            if grep -q "listen-on-v6" "$NAMED_OPTIONS" 2>/dev/null; then
+                if grep -q 'listen-on-v6.*none' "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] WARNING: BIND has listen-on-v6 set to none — IPv6 disabled"
+                    echo "    Secondary DNS won't be able to reach this server via IPv6"
+                fi
+            fi
+        elif [ "$IP_PREFERENCE" = "v4" ]; then
+            if grep -q 'listen-on\s' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
+                if grep -q 'listen-on.*none' "$NAMED_OPTIONS" 2>/dev/null; then
+                    echo "[!] WARNING: BIND has listen-on set to none — IPv4 disabled"
+                fi
+            fi
+        fi
+    fi
+
+    if [ -n "$PDNS_CONF" ]; then
+        PDNS_LOCAL=$(grep "^local-address=" "$PDNS_CONF" 2>/dev/null | sed 's/^local-address=//')
+        if [ -n "$PDNS_LOCAL" ]; then
+            if [ "$IP_PREFERENCE" = "v6" ] && ! echo "$PDNS_LOCAL" | grep -q ':'; then
+                echo "[!] WARNING: PowerDNS local-address has no IPv6 — only listening on $PDNS_LOCAL"
+            elif [ "$IP_PREFERENCE" = "v4" ] && ! echo "$PDNS_LOCAL" | grep -qE '^[0-9]'; then
+                echo "[!] WARNING: PowerDNS local-address has no IPv4 — only listening on $PDNS_LOCAL"
+            fi
+        fi
+    fi
+
     # --- PowerDNS configuration ---
     if [ -n "$PDNS_CONF" ]; then
         echo "[=] Detected PowerDNS: $PDNS_CONF"
