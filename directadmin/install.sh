@@ -108,7 +108,7 @@ echo "[+] Log file: $LOG_FILE"
 mkdir -p "$HOOKS_DIR"
 
 for hook in dns_create_post.sh dns_delete_post.sh; do
-    curl -sf --max-time 10 -o "$HOOKS_DIR/$hook" "$REPO_URL/$hook"
+    curl -sf --max-time 10 -o "$HOOKS_DIR/$hook" "$REPO_URL/$hook?t=$(date +%s)"
     chmod +x "$HOOKS_DIR/$hook"
     echo "[+] Installed hook: $HOOKS_DIR/$hook"
 done
@@ -236,7 +236,9 @@ if [ -n "$DNS_IPS" ]; then
                     echo "[!] BIND allow-transfer does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
                         cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+                        # Remove 'none;' if present, then add our IP
                         sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to allow-transfer"
                     fi
                 fi
