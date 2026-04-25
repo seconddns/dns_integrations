@@ -226,16 +226,16 @@ echo "--- DNS template configuration ---"
 if [ -z "$API_NS" ]; then
     echo "[!] Could not get nameserver from API — skipping DNS template"
 else
-    NS2_EXISTS=$(plesk bin server_dns --info 2>/dev/null | grep -c "$API_NS" || true)
-    if [ "$NS2_EXISTS" -gt 0 ]; then
+    NS2_EXISTS=$(plesk db "SELECT COUNT(*) FROM dns_recs_t WHERE type='NS' AND val LIKE '%${API_NS}%'" 2>/dev/null | tail -1 | tr -d ' ')
+    if [ "$NS2_EXISTS" -gt 0 ] 2>/dev/null; then
         echo "[+] $API_NS already in DNS template"
     else
         echo "[*] Current NS records in DNS template:"
-        plesk bin server_dns --info 2>/dev/null | grep -i "NS" || true
+        plesk db "SELECT val FROM dns_recs_t WHERE type='NS'" 2>/dev/null | grep -v "^+" | grep -v "^|.*val" | sed 's/|//g' | sed 's/^ */    /' || true
         echo ""
         if confirm "Add $API_NS as NS2 to the default DNS template?"; then
             plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
-            if [ $? -eq 0 ]; then
+            if [ $? -eq 0 ] || [ $? -eq 2 ]; then
                 echo "[+] Added $API_NS to DNS template"
             else
                 echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
