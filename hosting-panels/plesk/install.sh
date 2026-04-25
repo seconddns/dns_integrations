@@ -81,12 +81,17 @@ curl -sf --max-time 10 \
 SERVER_V4=$(curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
 SERVER_V6=$(curl -6 -sf --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
 
-# Get secondary DNS IPs from API
-API_DNS_IPS=$(curl -sf --max-time 10 \
+# Get secondary DNS info from API
+API_SERVER_INFO=$(curl -sf --max-time 10 \
     -H "X-API-Key: $API_KEY" \
     -H "User-Agent: SecondDNS-Installer/1.0" \
-    "$API_URL/api/server-info" 2>/dev/null | \
+    "$API_URL/api/server-info" 2>/dev/null || echo "{}")
+
+API_DNS_IPS=$(echo "$API_SERVER_INFO" | \
     python3 -c "import sys,json; print(json.load(sys.stdin).get('dnsIps',''))" 2>/dev/null || echo "")
+
+API_NS=$(echo "$API_SERVER_INFO" | \
+    python3 -c "import sys,json; ns=json.load(sys.stdin).get('nameservers',[]); print(ns[0] if ns else '')" 2>/dev/null || echo "")
 
 API_HAS_V4=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep -v ':' | grep -v '^$' | head -1)
 API_HAS_V6=$(echo "$API_DNS_IPS" | tr ',' '\n' | tr -d ' ' | grep ':' | head -1)
@@ -218,19 +223,23 @@ echo "[+] Registered $REGISTERED event handlers"
 echo ""
 echo "--- DNS template configuration ---"
 
-NS2_EXISTS=$(plesk bin server_dns --info 2>/dev/null | grep -c "ns2.seconddns.com" || true)
-if [ "$NS2_EXISTS" -gt 0 ]; then
-    echo "[+] ns2.seconddns.com already in DNS template"
+if [ -z "$API_NS" ]; then
+    echo "[!] Could not get nameserver from API — skipping DNS template"
 else
-    echo "[*] Current NS records in DNS template:"
-    plesk bin server_dns --info 2>/dev/null | grep -i "NS" || true
-    echo ""
-    if confirm "Add ns2.seconddns.com as NS2 to the default DNS template?"; then
-        plesk bin server_dns -a -ns "" -nameserver "ns2.seconddns.com" 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo "[+] Added ns2.seconddns.com to DNS template"
-        else
-            echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+    NS2_EXISTS=$(plesk bin server_dns --info 2>/dev/null | grep -c "$API_NS" || true)
+    if [ "$NS2_EXISTS" -gt 0 ]; then
+        echo "[+] $API_NS already in DNS template"
+    else
+        echo "[*] Current NS records in DNS template:"
+        plesk bin server_dns --info 2>/dev/null | grep -i "NS" || true
+        echo ""
+        if confirm "Add $API_NS as NS2 to the default DNS template?"; then
+            plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo "[+] Added $API_NS to DNS template"
+            else
+                echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+            fi
         fi
     fi
 fi
