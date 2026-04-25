@@ -262,26 +262,84 @@ else
     fi
 fi
 
-# --- AXFR configuration (manual step) ---
+# --- AXFR configuration ---
 echo ""
 echo "--- AXFR configuration ---"
-echo ""
-if [ -n "$DNS_IPS" ]; then
-    SECONDARY_IP="${DNS_IPS%%,*}"
-    echo "[!] Plesk manages DNS config through its UI. Direct config file"
-    echo "    edits may be overwritten by Plesk."
-    echo ""
-    echo "    To enable zone transfers, go to:"
-    echo "    Tools & Settings > DNS Settings > Server-wide Settings"
-    echo ""
-    echo "    Add these lines to 'Additional DNS settings':"
-    echo ""
-    echo "      allow-transfer { $SECONDARY_IP; };"
-    echo "      also-notify { $SECONDARY_IP; };"
-    echo ""
-    echo "    Then click Apply."
-else
+
+if [ -z "$DNS_IPS" ]; then
     echo "[!] No secondary DNS IP — configure AXFR manually"
+else
+    SECONDARY_IP="${DNS_IPS%%,*}"
+    echo "[+] Secondary DNS IP: $SECONDARY_IP"
+
+    # Find BIND config
+    NAMED_OPTIONS=""
+    for f in /etc/bind/named.conf.options /etc/named.conf.options /etc/named.conf; do
+        [ -f "$f" ] && NAMED_OPTIONS="$f" && break
+    done
+
+    if [ -n "$NAMED_OPTIONS" ]; then
+        echo "[=] Detected BIND config: $NAMED_OPTIONS"
+
+        NEEDS_FIX=0
+        if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+            NEEDS_FIX=1
+        fi
+        if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+            NEEDS_FIX=1
+        fi
+
+        if [ "$NEEDS_FIX" -eq 1 ]; then
+            if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
+                cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+
+                # allow-transfer
+                if grep -q "allow-transfer" "$NAMED_OPTIONS"; then
+                    if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
+                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                    fi
+                else
+                    sed -i "/^options\s*{/,/^};/ {
+                        /^};/ i\\
+\\tallow-transfer { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
+                fi
+
+                # also-notify
+                if grep -q "also-notify" "$NAMED_OPTIONS"; then
+                    if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
+                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                    fi
+                else
+                    sed -i "/^options\s*{/,/^};/ {
+                        /^};/ i\\
+\\talso-notify { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
+                fi
+
+                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true
+                echo "[+] BIND configured and reloaded"
+            fi
+        else
+            echo "[+] BIND AXFR config already includes $SECONDARY_IP"
+        fi
+    fi
+
+    echo ""
+    echo "  ============================================================"
+    echo "  |  IMPORTANT: Plesk may overwrite direct config changes.   |"
+    echo "  |  To make AXFR settings permanent, also add them in:      |"
+    echo "  |                                                          |"
+    echo "  |  Tools & Settings > DNS Settings > Server-wide Settings  |"
+    echo "  |  > Additional DNS settings:                              |"
+    echo "  |                                                          |"
+    printf "  |    allow-transfer { %-37s |\n" "$SECONDARY_IP; };"
+    printf "  |    also-notify { %-41s |\n" "$SECONDARY_IP; };"
+    echo "  |                                                          |"
+    echo "  |  Then click Apply.                                       |"
+    echo "  ============================================================"
 fi
 
 # Initial sync
@@ -318,13 +376,15 @@ echo "  Domains created/deleted in Plesk will be"
 echo "  automatically synced to your secondary DNS."
 echo ""
 echo "  Verify handlers:  plesk bin event_handler --list"
-echo "  Verify DNS template:  plesk bin server_dns --info"
 if [ -n "$DNS_IPS" ]; then
     SECONDARY_IP="${DNS_IPS%%,*}"
     echo ""
-    echo "  IMPORTANT: Don't forget to configure AXFR in Plesk UI:"
-    echo "  Tools & Settings > DNS Settings > Server-wide Settings"
-    echo "  Add to 'Additional DNS settings':"
-    echo "    allow-transfer { $SECONDARY_IP; };"
-    echo "    also-notify { $SECONDARY_IP; };"
+    echo "  ============================================================"
+    echo "  |  Don't forget to configure AXFR in Plesk UI:             |"
+    echo "  |  Tools & Settings > DNS Settings > Server-wide Settings  |"
+    echo "  |                                                          |"
+    echo "  |  Add to 'Additional DNS settings':                       |"
+    printf "  |    allow-transfer { %-37s |\n" "$SECONDARY_IP; };"
+    printf "  |    also-notify { %-41s |\n" "$SECONDARY_IP; };"
+    echo "  ============================================================"
 fi
