@@ -32,7 +32,7 @@ The installer:
 - Detects server IP (IPv4/IPv6)
 - Installs event handler scripts to `/usr/local/bin/`
 - Registers Plesk event handlers via CLI
-- Configures BIND/PowerDNS for AXFR (allow-transfer, also-notify)
+- Adds the secondary nameserver to the DNS template
 - Offers to sync existing domains
 
 ### Options
@@ -44,12 +44,29 @@ The installer:
 | `--master-ip=IP` | Primary DNS IP (default: auto-detect) |
 | `--yes` | Skip confirmation prompts |
 
+## AXFR Configuration (Required)
+
+After installation, configure zone transfers in Plesk:
+
+1. Go to **Tools & Settings** → **DNS Settings** → **Server-wide Settings**
+2. In the **Additional DNS settings** field, add:
+
+```
+allow-transfer { SECONDARY_IP; };
+also-notify { SECONDARY_IP; };
+```
+
+Replace `SECONDARY_IP` with the IP shown by the installer. Click **Apply**.
+
+Plesk manages BIND/PowerDNS configuration through its own UI. Direct config file edits may be overwritten by Plesk, so always use the panel UI for these settings.
+
 ## Nameserver Configuration
 
-After installation, add the secondary nameserver in Plesk:
+The installer adds the secondary nameserver to the DNS template automatically. To verify:
 
-1. Go to **Tools & Settings** → **DNS Template**
-2. Add NS record: `ns2.seconddns.com`
+```bash
+plesk bin server_dns --info
+```
 
 For existing domains, add the NS record through each domain's DNS settings or use the Plesk mass update feature.
 
@@ -85,7 +102,7 @@ plesk bin event_handler --list | grep seconddns
 ```
 
 **AXFR refused:**
-Check BIND `allow-transfer` in `named.conf` or PowerDNS `allow-axfr-ips` in `pdns.conf`.
+Make sure you configured AXFR in Plesk UI (Tools & Settings → DNS Settings → Server-wide Settings → Additional DNS settings). See the AXFR Configuration section above.
 
 **Timeout:**
 Verify TCP port 53 is open. AXFR uses TCP.

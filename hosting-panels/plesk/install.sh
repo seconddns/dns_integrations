@@ -244,141 +244,26 @@ else
     fi
 fi
 
-# --- BIND configuration ---
+# --- AXFR configuration (manual step) ---
 echo ""
-echo "--- BIND AXFR configuration ---"
-
-if [ -z "$DNS_IPS" ]; then
-    echo "[!] No secondary DNS IP — skipping AXFR config"
-fi
-
+echo "--- AXFR configuration ---"
+echo ""
 if [ -n "$DNS_IPS" ]; then
-    echo "[+] Secondary DNS IP: $DNS_IPS"
     SECONDARY_IP="${DNS_IPS%%,*}"
-
-    NAMED_CONF=""
-    for f in /etc/named.conf /var/named/run-root/etc/named.conf /etc/bind/named.conf; do
-        [ -f "$f" ] && NAMED_CONF="$f" && break
-    done
-
-    if [ -z "$NAMED_CONF" ]; then
-        # Check if Plesk uses PowerDNS instead
-        PDNS_CONF=""
-        for f in /etc/pdns/pdns.conf /etc/powerdns/pdns.conf /etc/pdns.conf; do
-            [ -f "$f" ] && PDNS_CONF="$f" && break
-        done
-    fi
-
-    if [ -n "$NAMED_CONF" ]; then
-        echo "[=] Detected BIND: $NAMED_CONF"
-
-        NAMED_OPTIONS=""
-        for f in /etc/named.conf.options /etc/bind/named.conf.options "$NAMED_CONF"; do
-            [ -f "$f" ] && NAMED_OPTIONS="$f" && break
-        done
-
-        if [ -n "$NAMED_OPTIONS" ]; then
-            ISSUES=0
-
-            if grep -q "allow-transfer" "$NAMED_OPTIONS" 2>/dev/null; then
-                if ! grep -q "$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-                    echo "[!] allow-transfer does not include $SECONDARY_IP"
-                    ISSUES=$((ISSUES+1))
-                fi
-            else
-                echo "[!] No allow-transfer directive found"
-                ISSUES=$((ISSUES+1))
-            fi
-
-            if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-                echo "[!] also-notify does not include $SECONDARY_IP"
-                ISSUES=$((ISSUES+1))
-            fi
-
-            if [ "$ISSUES" -gt 0 ]; then
-                if confirm "Apply BIND AXFR fixes automatically? (backup will be created)"; then
-                    cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
-
-                    if grep -q "allow-transfer" "$NAMED_OPTIONS"; then
-                        if ! grep -q "$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                            sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                            sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
-                        fi
-                    else
-                        sed -i "/^options\s*{/,/^};/ {
-                            /^};/ i\\
-\\tallow-transfer { $SECONDARY_IP; };\\
-\\talso-notify { $SECONDARY_IP; };
-                        }" "$NAMED_OPTIONS"
-                    fi
-
-                    if grep -q "also-notify" "$NAMED_OPTIONS"; then
-                        if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                            sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                            sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
-                        fi
-                    elif ! grep -q "also-notify" "$NAMED_OPTIONS"; then
-                        sed -i "/^options\s*{/,/^};/ {
-                            /^};/ i\\
-\\talso-notify { $SECONDARY_IP; };
-                        }" "$NAMED_OPTIONS"
-                    fi
-
-                    rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || service named reload 2>/dev/null
-                    echo "[+] BIND configured and reloaded"
-                fi
-            else
-                echo "[+] BIND AXFR config OK"
-            fi
-        fi
-
-    elif [ -n "$PDNS_CONF" ]; then
-        echo "[=] Detected PowerDNS: $PDNS_CONF"
-        ISSUES=0
-
-        if ! grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
-            echo "[!] master=yes is missing"
-            ISSUES=$((ISSUES+1))
-        fi
-        if ! grep -qE "^allow-axfr-ips=.*$SECONDARY_IP" "$PDNS_CONF" 2>/dev/null; then
-            echo "[!] allow-axfr-ips does not include $SECONDARY_IP"
-            ISSUES=$((ISSUES+1))
-        fi
-        if ! grep -qE "^also-notify=.*$SECONDARY_IP" "$PDNS_CONF" 2>/dev/null; then
-            echo "[!] also-notify does not include $SECONDARY_IP"
-            ISSUES=$((ISSUES+1))
-        fi
-
-        if [ "$ISSUES" -gt 0 ]; then
-            if confirm "Apply PowerDNS fixes automatically? (backup will be created)"; then
-                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
-
-                grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
-
-                if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
-                    grep -qE "^allow-axfr-ips=.*$SECONDARY_IP" "$PDNS_CONF" || \
-                        sed -i "s|^allow-axfr-ips=\(.*\)|allow-axfr-ips=\1,$DNS_IPS|" "$PDNS_CONF"
-                else
-                    echo "allow-axfr-ips=127.0.0.0/8,::1,$DNS_IPS" >> "$PDNS_CONF"
-                fi
-
-                if grep -qE "^also-notify=" "$PDNS_CONF"; then
-                    grep -qE "^also-notify=.*$SECONDARY_IP" "$PDNS_CONF" || \
-                        sed -i "s|^also-notify=\(.*\)|also-notify=\1,$DNS_IPS|" "$PDNS_CONF"
-                else
-                    echo "also-notify=$DNS_IPS" >> "$PDNS_CONF"
-                fi
-
-                systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
-                echo "[+] PowerDNS configured and restarted"
-            fi
-        else
-            echo "[+] PowerDNS AXFR config OK"
-        fi
-    else
-        echo "[!] Could not detect DNS server"
-        echo "    Configure AXFR manually to allow transfers to $SECONDARY_IP"
-    fi
+    echo "[!] Plesk manages DNS config through its UI. Direct config file"
+    echo "    edits may be overwritten by Plesk."
+    echo ""
+    echo "    To enable zone transfers, go to:"
+    echo "    Tools & Settings > DNS Settings > Server-wide Settings"
+    echo ""
+    echo "    Add these lines to 'Additional DNS settings':"
+    echo ""
+    echo "      allow-transfer { $SECONDARY_IP; };"
+    echo "      also-notify { $SECONDARY_IP; };"
+    echo ""
+    echo "    Then click Apply."
+else
+    echo "[!] No secondary DNS IP — configure AXFR manually"
 fi
 
 # Initial sync
@@ -414,5 +299,14 @@ echo ""
 echo "  Domains created/deleted in Plesk will be"
 echo "  automatically synced to your secondary DNS."
 echo ""
-echo "  To verify registered handlers:"
-echo "    plesk bin event_handler --list"
+echo "  Verify handlers:  plesk bin event_handler --list"
+echo "  Verify DNS template:  plesk bin server_dns --info"
+if [ -n "$DNS_IPS" ]; then
+    SECONDARY_IP="${DNS_IPS%%,*}"
+    echo ""
+    echo "  IMPORTANT: Don't forget to configure AXFR in Plesk UI:"
+    echo "  Tools & Settings > DNS Settings > Server-wide Settings"
+    echo "  Add to 'Additional DNS settings':"
+    echo "    allow-transfer { $SECONDARY_IP; };"
+    echo "    also-notify { $SECONDARY_IP; };"
+fi
