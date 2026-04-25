@@ -219,7 +219,7 @@ done
 
 echo "[+] Registered $REGISTERED event handlers"
 
-# --- DNS template: add ns2.seconddns.com ---
+# --- DNS template: replace default ns2 with secondary ---
 echo ""
 echo "--- DNS template configuration ---"
 
@@ -232,13 +232,31 @@ else
     else
         echo "[*] Current NS records in DNS template:"
         plesk db "SELECT val FROM dns_recs_t WHERE type='NS'" 2>/dev/null | grep -v "^+" | grep -v "^|.*val" | sed 's/|//g' | sed 's/^ */    /' || true
+
+        # Check for default ns2.<domain>. that points to the same server
+        DEFAULT_NS2=$(plesk db "SELECT COUNT(*) FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null | tail -1 | tr -d ' ')
+
         echo ""
-        if confirm "Add $API_NS as NS2 to the default DNS template?"; then
-            plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
-            if [ $? -eq 0 ] || [ $? -eq 2 ]; then
-                echo "[+] Added $API_NS to DNS template"
-            else
-                echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+        if [ "$DEFAULT_NS2" -gt 0 ] 2>/dev/null; then
+            echo "[*] Default ns2.<domain>. points to the same server — not a real secondary."
+            if confirm "Replace ns2.<domain>. with $API_NS in DNS template?"; then
+                plesk db "DELETE FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null
+                echo "[+] Removed ns2.<domain>. from template"
+                plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
+                if [ $? -eq 0 ] || [ $? -eq 2 ]; then
+                    echo "[+] Added $API_NS to DNS template"
+                else
+                    echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+                fi
+            fi
+        else
+            if confirm "Add $API_NS as NS2 to the default DNS template?"; then
+                plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
+                if [ $? -eq 0 ] || [ $? -eq 2 ]; then
+                    echo "[+] Added $API_NS to DNS template"
+                else
+                    echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+                fi
             fi
         fi
     fi
