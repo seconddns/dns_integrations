@@ -1,4 +1,4 @@
-# SecondDNS — Plesk Integration
+# SecondDNS — Plesk Hosting Panel Integration
 
 Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation and deletion to SecondDNS via API + AXFR.
 
