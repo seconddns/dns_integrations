@@ -1,4 +1,4 @@
-# CyberPanel Integration
+# SecondDNS — CyberPanel Hosting Panel Integration
 
 Automatic secondary DNS zone management for CyberPanel servers. When a DNS zone is created or deleted in CyberPanel, the secondary DNS zone is instantly synced via API.
 

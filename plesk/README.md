@@ -1,4 +1,4 @@
-# SecondDNS — Plesk Integration
+# SecondDNS — Plesk Hosting Panel Integration
 
 Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation and deletion to SecondDNS via API + AXFR.
 
@@ -69,12 +69,12 @@ dig @ns2.seconddns.com example.com SOA +short
 
 ## Supported Events
 
-| Plesk Event | Action |
-|---|---|
-| Domain created | Add zone to SecondDNS |
-| Default domain created | Add zone to SecondDNS |
-| Domain deleted | Remove zone from SecondDNS |
-| Default domain deleted | Remove zone from SecondDNS |
+| Plesk Event ID | Description | Action |
+|---|---|---|
+| `domain_create` | Default domain (first in subscription) created | Add zone to SecondDNS |
+| `site_create` | Additional domain created | Add zone to SecondDNS |
+| `domain_delete` | Default domain deleted | Remove zone from SecondDNS |
+| `site_delete` | Additional domain deleted | Remove zone from SecondDNS |
 
 ## Troubleshooting
 

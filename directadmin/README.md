@@ -1,4 +1,4 @@
-# DirectAdmin — SecondDNS Integration
+# SecondDNS — DirectAdmin Hosting Panel Integration
 
 Automatically sync DNS zones from DirectAdmin to SecondDNS via AXFR zone transfers.
 

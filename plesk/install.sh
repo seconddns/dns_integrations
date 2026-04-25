@@ -170,28 +170,10 @@ done
 echo ""
 echo "--- Registering Plesk event handlers ---"
 
-# Get available events to find exact event IDs
-DOMAIN_CREATE_EVENT=""
-DOMAIN_DELETE_EVENT=""
-DEFAULT_CREATE_EVENT=""
-DEFAULT_DELETE_EVENT=""
-
-while IFS= read -r line; do
-    case "$line" in
-        *"domain_create"*|*"Domain created"*)
-            [ -z "$DOMAIN_CREATE_EVENT" ] && DOMAIN_CREATE_EVENT=$(echo "$line" | awk '{print $1}')
-            ;;
-        *"domain_delete"*|*"Domain deleted"*)
-            [ -z "$DOMAIN_DELETE_EVENT" ] && DOMAIN_DELETE_EVENT=$(echo "$line" | awk '{print $1}')
-            ;;
-        *"default_domain_create"*|*"Default domain"*"created"*)
-            [ -z "$DEFAULT_CREATE_EVENT" ] && DEFAULT_CREATE_EVENT=$(echo "$line" | awk '{print $1}')
-            ;;
-        *"default_domain_delete"*|*"Default domain"*"deleted"*)
-            [ -z "$DEFAULT_DELETE_EVENT" ] && DEFAULT_DELETE_EVENT=$(echo "$line" | awk '{print $1}')
-            ;;
-    esac
-done < <(plesk bin event_handler --list-events 2>/dev/null)
+# Plesk has two domain types:
+#   domain_create/domain_delete — default domain (first domain in a subscription)
+#   site_create/site_delete     — additional domains
+# Both pass NEW_DOMAIN_NAME / OLD_DOMAIN_NAME env vars.
 
 # Remove any existing SecondDNS handlers (re-install safe)
 while IFS= read -r handler_id; do
@@ -200,53 +182,35 @@ done < <(plesk bin event_handler --list 2>/dev/null | grep "seconddns-plesk" | a
 
 REGISTERED=0
 
-# Register domain created handler
-if [ -n "$DOMAIN_CREATE_EVENT" ]; then
+# Creation events: domain_create (default domain) + site_create (additional domains)
+for ev in domain_create site_create; do
     plesk bin event_handler --create \
         -command "$SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
         -priority 10 \
         -user root \
-        -event "$DOMAIN_CREATE_EVENT" 2>/dev/null
-    echo "[+] Registered handler: domain created (event: $DOMAIN_CREATE_EVENT)"
-    REGISTERED=$((REGISTERED+1))
-else
-    echo "[!] Could not find 'domain created' event — register manually"
-fi
+        -event "$ev" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "[+] Registered handler: $ev"
+        REGISTERED=$((REGISTERED+1))
+    else
+        echo "[!] Failed to register handler for $ev"
+    fi
+done
 
-# Register default domain created handler
-if [ -n "$DEFAULT_CREATE_EVENT" ]; then
-    plesk bin event_handler --create \
-        -command "$SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
-        -priority 10 \
-        -user root \
-        -event "$DEFAULT_CREATE_EVENT" 2>/dev/null
-    echo "[+] Registered handler: default domain created (event: $DEFAULT_CREATE_EVENT)"
-    REGISTERED=$((REGISTERED+1))
-fi
-
-# Register domain deleted handler
-if [ -n "$DOMAIN_DELETE_EVENT" ]; then
+# Deletion events: domain_delete (default domain) + site_delete (additional domains)
+for ev in domain_delete site_delete; do
     plesk bin event_handler --create \
         -command "$SCRIPT_DIR/seconddns-plesk-domain_delete.sh" \
         -priority 10 \
         -user root \
-        -event "$DOMAIN_DELETE_EVENT" 2>/dev/null
-    echo "[+] Registered handler: domain deleted (event: $DOMAIN_DELETE_EVENT)"
-    REGISTERED=$((REGISTERED+1))
-else
-    echo "[!] Could not find 'domain deleted' event — register manually"
-fi
-
-# Register default domain deleted handler
-if [ -n "$DEFAULT_DELETE_EVENT" ]; then
-    plesk bin event_handler --create \
-        -command "$SCRIPT_DIR/seconddns-plesk-domain_delete.sh" \
-        -priority 10 \
-        -user root \
-        -event "$DEFAULT_DELETE_EVENT" 2>/dev/null
-    echo "[+] Registered handler: default domain deleted (event: $DEFAULT_DELETE_EVENT)"
-    REGISTERED=$((REGISTERED+1))
-fi
+        -event "$ev" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "[+] Registered handler: $ev"
+        REGISTERED=$((REGISTERED+1))
+    else
+        echo "[!] Failed to register handler for $ev"
+    fi
+done
 
 echo "[+] Registered $REGISTERED event handlers"
 
