@@ -4,12 +4,12 @@ set -e
 # SecondDNS Plesk Integration Installer
 # Usage:
 #   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
-#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/plesk/install.sh | bash -s -- --api-key=YOUR_KEY
+#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_KEY
 
 CONFIG_FILE="/etc/seconddns.conf"
 LOG_FILE="/var/log/seconddns.log"
 SCRIPT_DIR="/usr/local/bin"
-REPO_URL="https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/plesk"
+REPO_URL="https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk"
 
 API_KEY=""
 API_URL="https://seconddns.com"

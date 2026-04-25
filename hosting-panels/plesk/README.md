@@ -24,7 +24,7 @@ Handles both regular domains and default (subscription) domains.
 ## Installation
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/plesk/install.sh | bash -s -- --api-key=YOUR_API_KEY
+curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_API_KEY
 ```
 
 The installer:
@@ -98,7 +98,7 @@ NEW_DOMAIN_NAME=example.com /usr/local/bin/seconddns-plesk-domain_create.sh
 ## Uninstall
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/plesk/uninstall.sh | bash
+curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/uninstall.sh | bash
 ```
 
 Removes event handlers, scripts, and config. Zones on the secondary are not deleted automatically.

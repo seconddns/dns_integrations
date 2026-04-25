@@ -4,7 +4,7 @@ set -e
 # SecondDNS CyberPanel Integration Installer
 # Usage:
 #   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
-#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
+#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
 
 INSTALL_DIR="/usr/local/bin"
 CONFIG_FILE="/etc/seconddns.conf"
