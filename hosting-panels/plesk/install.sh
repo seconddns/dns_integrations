@@ -226,37 +226,37 @@ echo "--- DNS template configuration ---"
 if [ -z "$API_NS" ]; then
     echo "[!] Could not get nameserver from API — skipping DNS template"
 else
-    NS2_EXISTS=$(plesk db "SELECT COUNT(*) FROM dns_recs_t WHERE type='NS' AND val LIKE '%${API_NS}%'" 2>/dev/null | tail -1 | tr -d ' ')
-    if [ "$NS2_EXISTS" -gt 0 ] 2>/dev/null; then
+    # Plesk stores NS values with trailing dot (e.g. ns2.seconddns.com.)
+    NS2_COUNT=$(plesk db "SELECT COUNT(*) AS cnt FROM dns_recs_t WHERE type='NS' AND val LIKE '%${API_NS}%'" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
+    DEFAULT_NS2_COUNT=$(plesk db "SELECT COUNT(*) AS cnt FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
+
+    echo "[*] Current NS records in DNS template:"
+    plesk db "SELECT val FROM dns_recs_t WHERE type='NS'" 2>/dev/null | grep -oE '[a-zA-Z0-9.<>-]+\.' | sed 's/^/    /' || true
+
+    if [ "${NS2_COUNT:-0}" -gt 0 ]; then
         echo "[+] $API_NS already in DNS template"
+        # Still check if default ns2.<domain>. should be removed
+        if [ "${DEFAULT_NS2_COUNT:-0}" -gt 0 ]; then
+            echo "[*] Default ns2.<domain>. is redundant — points to the same server."
+            if confirm "Remove ns2.<domain>. from DNS template?"; then
+                plesk db "DELETE FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null
+                echo "[+] Removed ns2.<domain>. from template"
+            fi
+        fi
     else
-        echo "[*] Current NS records in DNS template:"
-        plesk db "SELECT val FROM dns_recs_t WHERE type='NS'" 2>/dev/null | grep -v "^+" | grep -v "^|.*val" | sed 's/|//g' | sed 's/^ */    /' || true
-
-        # Check for default ns2.<domain>. that points to the same server
-        DEFAULT_NS2=$(plesk db "SELECT COUNT(*) FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null | tail -1 | tr -d ' ')
-
         echo ""
-        if [ "$DEFAULT_NS2" -gt 0 ] 2>/dev/null; then
+        if [ "${DEFAULT_NS2_COUNT:-0}" -gt 0 ]; then
             echo "[*] Default ns2.<domain>. points to the same server — not a real secondary."
             if confirm "Replace ns2.<domain>. with $API_NS in DNS template?"; then
                 plesk db "DELETE FROM dns_recs_t WHERE type='NS' AND val='ns2.<domain>.'" 2>/dev/null
                 echo "[+] Removed ns2.<domain>. from template"
                 plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
-                if [ $? -eq 0 ] || [ $? -eq 2 ]; then
-                    echo "[+] Added $API_NS to DNS template"
-                else
-                    echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
-                fi
+                echo "[+] Added $API_NS to DNS template"
             fi
         else
             if confirm "Add $API_NS as NS2 to the default DNS template?"; then
                 plesk bin server_dns -a -ns "" -nameserver "$API_NS" 2>/dev/null
-                if [ $? -eq 0 ] || [ $? -eq 2 ]; then
-                    echo "[+] Added $API_NS to DNS template"
-                else
-                    echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
-                fi
+                echo "[+] Added $API_NS to DNS template"
             fi
         fi
     fi
@@ -295,28 +295,26 @@ else
 
                 # allow-transfer
                 if grep -q "allow-transfer" "$NAMED_OPTIONS"; then
+                    # Remove none; from allow-transfer line only
+                    sed -i '/allow-transfer/s/none;//g' "$NAMED_OPTIONS"
+                    # Add our IP if not already there
                     if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
                         sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
                     fi
                 else
-                    sed -i "/^options\s*{/,/^};/ {
-                        /^};/ i\\
-\\tallow-transfer { $SECONDARY_IP; };
-                    }" "$NAMED_OPTIONS"
+                    sed -i "/^[[:space:]]*};/i\\
+\\tallow-transfer { $SECONDARY_IP; };" "$NAMED_OPTIONS"
                 fi
 
                 # also-notify
                 if grep -q "also-notify" "$NAMED_OPTIONS"; then
+                    sed -i '/also-notify/s/none;//g' "$NAMED_OPTIONS"
                     if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
                         sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
                     fi
                 else
-                    sed -i "/^options\s*{/,/^};/ {
-                        /^};/ i\\
-\\talso-notify { $SECONDARY_IP; };
-                    }" "$NAMED_OPTIONS"
+                    sed -i "/^[[:space:]]*};/i\\
+\\talso-notify { $SECONDARY_IP; };" "$NAMED_OPTIONS"
                 fi
 
                 rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true
