@@ -181,9 +181,22 @@ echo "--- Registering Plesk event handlers ---"
 # Both pass NEW_DOMAIN_NAME / OLD_DOMAIN_NAME env vars.
 
 # Remove any existing SecondDNS handlers (re-install safe)
-while IFS= read -r handler_id; do
-    [ -n "$handler_id" ] && plesk bin event_handler --delete "$handler_id" 2>/dev/null || true
-done < <(plesk bin event_handler --list 2>/dev/null | grep "seconddns-plesk" | awk '{print $1}')
+# --list output has Id and Command on separate lines, so we track the current Id
+# and delete when the Command line matches our scripts
+CURRENT_ID=""
+while IFS= read -r line; do
+    case "$line" in
+        *"Id "*)
+            CURRENT_ID=$(echo "$line" | awk '{print $NF}')
+            ;;
+        *"seconddns-plesk"*)
+            if [ -n "$CURRENT_ID" ]; then
+                plesk bin event_handler --delete "$CURRENT_ID" 2>/dev/null || true
+                CURRENT_ID=""
+            fi
+            ;;
+    esac
+done < <(plesk bin event_handler --list 2>/dev/null)
 
 REGISTERED=0
 
