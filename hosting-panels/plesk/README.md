@@ -1,25 +1,27 @@
 # SecondDNS — Plesk Hosting Panel Integration
 
-Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation and deletion to SecondDNS via API + AXFR.
+Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation, deletion, and domain aliases to SecondDNS via API + AXFR.
+
+Tested on Plesk Obsidian 18.0.77.2 (Ubuntu 24.04).
 
 ## How It Works
 
-Two shell scripts are registered as Plesk event handlers:
+Two shell scripts are registered as Plesk event handlers for 8 events:
 
-1. **Domain created** — calls SecondDNS API to register the zone
-2. **Domain deleted** — removes the zone from SecondDNS
+1. **Domain/alias created** — calls SecondDNS API to register the zone
+2. **Domain/alias deleted** — removes the zone from SecondDNS
 
-After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND/PowerDNS NOTIFY.
+After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND NOTIFY.
 
-Handles both regular domains and default (subscription) domains.
+Handles all Plesk domain types: default domains (first in subscription), additional domains, and domain aliases.
 
 ## Requirements
 
 - Plesk Obsidian (18.x+)
 - Root access
-- BIND or PowerDNS as DNS server
+- BIND as DNS server
 - TCP port 53 open to SecondDNS
-- SecondDNS API key
+- SecondDNS API key (get one at seconddns.com/dashboard/api-key)
 
 ## Installation
 
@@ -31,8 +33,9 @@ The installer:
 - Verifies the API key
 - Detects server IP (IPv4/IPv6)
 - Installs event handler scripts to `/usr/local/bin/`
-- Registers Plesk event handlers via CLI
-- Adds the secondary nameserver to the DNS template
+- Registers 8 Plesk event handlers via CLI
+- Replaces default `ns2.<domain>` with secondary nameserver in DNS template
+- Configures BIND for AXFR (allow-transfer, also-notify)
 - Offers to sync existing domains
 
 ### Options
@@ -44,9 +47,11 @@ The installer:
 | `--master-ip=IP` | Primary DNS IP (default: auto-detect) |
 | `--yes` | Skip confirmation prompts |
 
-## AXFR Configuration (Required)
+## AXFR Configuration
 
-After installation, configure zone transfers in Plesk:
+The installer configures `allow-transfer` and `also-notify` in `named.conf.options` directly. However, Plesk may overwrite these settings during config regeneration.
+
+To make AXFR settings permanent, also add them via Plesk UI:
 
 1. Go to **Tools & Settings** → **DNS Settings** → **Server-wide Settings**
 2. In the **Additional DNS settings** field, add:
@@ -58,14 +63,16 @@ also-notify { SECONDARY_IP; };
 
 Replace `SECONDARY_IP` with the IP shown by the installer. Click **Apply**.
 
-Plesk manages BIND/PowerDNS configuration through its own UI. Direct config file edits may be overwritten by Plesk, so always use the panel UI for these settings.
+## DNS Template
 
-## Nameserver Configuration
+The installer automatically:
+- Adds the secondary nameserver (e.g. `ns2.seconddns.com`) to the DNS zone template
+- Offers to remove the default `ns2.<domain>` record (which points to the same server and provides no redundancy)
 
-The installer adds the secondary nameserver to the DNS template automatically. To verify:
+To verify the current NS records in the template:
 
 ```bash
-plesk bin server_dns --info
+plesk db "SELECT val FROM dns_recs_t WHERE type='NS'"
 ```
 
 For existing domains, add the NS record through each domain's DNS settings or use the Plesk mass update feature.
@@ -73,8 +80,8 @@ For existing domains, add the NS record through each domain's DNS settings or us
 ## Verification
 
 ```bash
-# Check registered handlers
-plesk bin event_handler --list
+# Check registered handlers (should show 8)
+plesk bin event_handler --list | grep seconddns
 
 # Watch the log
 tail -f /var/log/seconddns.log
@@ -88,14 +95,14 @@ dig @ns2.seconddns.com example.com SOA +short
 
 | Plesk Event ID | Description | Action |
 |---|---|---|
-| `domain_create` | Default domain (first in subscription) created | Add zone to SecondDNS |
-| `site_create` | Additional domain created | Add zone to SecondDNS |
-| `domain_alias_create` | Default domain alias created | Add zone to SecondDNS |
-| `site_alias_create` | Domain alias created | Add zone to SecondDNS |
-| `domain_delete` | Default domain deleted | Remove zone from SecondDNS |
-| `site_delete` | Additional domain deleted | Remove zone from SecondDNS |
-| `domain_alias_delete` | Default domain alias deleted | Remove zone from SecondDNS |
-| `site_alias_delete` | Domain alias deleted | Remove zone from SecondDNS |
+| `domain_create` | Default domain (first in subscription) created | Add zone |
+| `site_create` | Additional domain created | Add zone |
+| `domain_alias_create` | Default domain alias created | Add zone |
+| `site_alias_create` | Domain alias created | Add zone |
+| `domain_delete` | Default domain deleted | Remove zone |
+| `site_delete` | Additional domain deleted | Remove zone |
+| `domain_alias_delete` | Default domain alias deleted | Remove zone |
+| `site_alias_delete` | Domain alias deleted | Remove zone |
 
 ## Troubleshooting
 
@@ -106,14 +113,17 @@ plesk bin event_handler --list | grep seconddns
 ```
 
 **AXFR refused:**
-Make sure you configured AXFR in Plesk UI (Tools & Settings → DNS Settings → Server-wide Settings → Additional DNS settings). See the AXFR Configuration section above.
+Make sure AXFR is configured both in `named.conf.options` and in Plesk UI (Tools & Settings → DNS Settings → Server-wide Settings → Additional DNS settings).
 
 **Timeout:**
-Verify TCP port 53 is open. AXFR uses TCP.
+Verify TCP port 53 is open between your server and SecondDNS. AXFR uses TCP.
+
+**Duplicate handlers after re-install:**
+The installer removes existing SecondDNS handlers before registering new ones. If you see duplicates, run the uninstaller first, then re-install.
 
 **Test handler manually:**
 ```bash
-NEW_DOMAIN_NAME=example.com /usr/local/bin/seconddns-plesk-domain_create.sh
+NEW_DOMAIN_NAME=example.com bash -c /usr/local/bin/seconddns-plesk-domain_create.sh
 ```
 
 ## Uninstall
