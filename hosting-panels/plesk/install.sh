@@ -214,6 +214,27 @@ done
 
 echo "[+] Registered $REGISTERED event handlers"
 
+# --- DNS template: add ns2.seconddns.com ---
+echo ""
+echo "--- DNS template configuration ---"
+
+NS2_EXISTS=$(plesk bin server_dns --info 2>/dev/null | grep -c "ns2.seconddns.com" || true)
+if [ "$NS2_EXISTS" -gt 0 ]; then
+    echo "[+] ns2.seconddns.com already in DNS template"
+else
+    echo "[*] Current NS records in DNS template:"
+    plesk bin server_dns --info 2>/dev/null | grep -i "NS" || true
+    echo ""
+    if confirm "Add ns2.seconddns.com as NS2 to the default DNS template?"; then
+        plesk bin server_dns -a -ns "" -nameserver "ns2.seconddns.com" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "[+] Added ns2.seconddns.com to DNS template"
+        else
+            echo "[!] Failed to add NS record — add manually via Tools & Settings > DNS Template"
+        fi
+    fi
+fi
+
 # --- BIND configuration ---
 echo ""
 echo "--- BIND AXFR configuration ---"
