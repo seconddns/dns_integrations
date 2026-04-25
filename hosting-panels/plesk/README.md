@@ -90,8 +90,12 @@ dig @ns2.seconddns.com example.com SOA +short
 |---|---|---|
 | `domain_create` | Default domain (first in subscription) created | Add zone to SecondDNS |
 | `site_create` | Additional domain created | Add zone to SecondDNS |
+| `domain_alias_create` | Default domain alias created | Add zone to SecondDNS |
+| `site_alias_create` | Domain alias created | Add zone to SecondDNS |
 | `domain_delete` | Default domain deleted | Remove zone from SecondDNS |
 | `site_delete` | Additional domain deleted | Remove zone from SecondDNS |
+| `domain_alias_delete` | Default domain alias deleted | Remove zone from SecondDNS |
+| `site_alias_delete` | Domain alias deleted | Remove zone from SecondDNS |
 
 ## Troubleshooting
 

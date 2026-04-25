@@ -13,11 +13,20 @@ echo ""
 # Remove event handlers
 if command -v plesk &>/dev/null; then
     removed=0
-    while IFS= read -r handler_id; do
-        if [ -n "$handler_id" ]; then
-            plesk bin event_handler --delete "$handler_id" 2>/dev/null && removed=$((removed+1))
-        fi
-    done < <(plesk bin event_handler --list 2>/dev/null | grep "seconddns-plesk" | awk '{print $1}')
+    CURRENT_ID=""
+    while IFS= read -r line; do
+        case "$line" in
+            *"Id "*)
+                CURRENT_ID=$(echo "$line" | awk '{print $NF}')
+                ;;
+            *"seconddns-plesk"*)
+                if [ -n "$CURRENT_ID" ]; then
+                    plesk bin event_handler --delete "$CURRENT_ID" 2>/dev/null && removed=$((removed+1))
+                    CURRENT_ID=""
+                fi
+                ;;
+        esac
+    done < <(plesk bin event_handler --list 2>/dev/null)
     echo "[+] Removed $removed event handlers"
 fi
 

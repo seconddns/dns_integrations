@@ -200,10 +200,10 @@ done < <(plesk bin event_handler --list 2>/dev/null)
 
 REGISTERED=0
 
-# Creation events: domain_create (default domain) + site_create (additional domains)
-for ev in domain_create site_create; do
+# Creation events: domains + domain aliases
+for ev in domain_create site_create domain_alias_create site_alias_create; do
     plesk bin event_handler --create \
-        -command "$SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
+        -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
         -priority 10 \
         -user root \
         -event "$ev" 2>/dev/null
@@ -215,10 +215,10 @@ for ev in domain_create site_create; do
     fi
 done
 
-# Deletion events: domain_delete (default domain) + site_delete (additional domains)
-for ev in domain_delete site_delete; do
+# Deletion events: domains + domain aliases
+for ev in domain_delete site_delete domain_alias_delete site_alias_delete; do
     plesk bin event_handler --create \
-        -command "$SCRIPT_DIR/seconddns-plesk-domain_delete.sh" \
+        -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_delete.sh" \
         -priority 10 \
         -user root \
         -event "$ev" 2>/dev/null
