@@ -24,14 +24,14 @@ Zone data is transferred via AXFR from your DirectAdmin server to the SecondDNS 
 ## Install
 
 ```bash
-curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/install.sh" \
+curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/directadmin/install.sh" \
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
 ## Uninstall
 
 ```bash
-curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/directadmin/uninstall.sh" \
+curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/directadmin/uninstall.sh" \
   | bash
 ```
 

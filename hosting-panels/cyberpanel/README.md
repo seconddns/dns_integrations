@@ -5,7 +5,7 @@ Automatic secondary DNS zone management for CyberPanel servers. When a DNS zone 
 ## Quick Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/cyberpanel/install.sh \
+curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/cyberpanel/install.sh \
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
