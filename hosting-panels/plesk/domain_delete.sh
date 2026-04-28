@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 - see LICENSE file
 # SecondDNS integration — Plesk event handler
 # Triggered after a domain or domain alias is deleted
 # Env: OLD_DOMAIN_NAME, OLD_DOMAIN_ALIAS_NAME
