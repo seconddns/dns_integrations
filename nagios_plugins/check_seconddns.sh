@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 - see LICENSE file
 # Nagios/Icinga check plugin for SecondDNS zone health.
 #
 # Queries the SecondDNS health API and returns Nagios-compatible output.

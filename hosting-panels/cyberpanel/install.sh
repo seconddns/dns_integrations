@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 - see LICENSE file
 set -e
 
 # SecondDNS CyberPanel Integration Installer
