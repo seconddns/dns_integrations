@@ -15,6 +15,17 @@ After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent chan
 
 Handles all Plesk domain types: default domains (first in subscription), additional domains, and domain aliases.
 
+## Internationalized Domain Names (IDN)
+
+The integration fully supports IDN domains (e.g. `каба-жаба.укр`, `münchen.de`, `中国.cn`).
+
+IDN domains are automatically converted to Punycode format (e.g. `xn----7sbabacd2b5a.xn--j1amh`) before being synced to SecondDNS. This conversion is handled transparently by the event handlers.
+
+**Requirements for IDN support:**
+- The installer automatically installs `idn2` (or `idn` as fallback) if not already present
+- Supported on Debian/Ubuntu, RHEL/CentOS, and other Linux distributions with `apt-get` or `yum`
+- If your distribution uses a different package manager, manually install `libidn2-bin` (Debian) or `libidn2` (RHEL)
+
 ## Requirements
 
 - Plesk Obsidian (18.x+)
@@ -121,9 +132,23 @@ Verify TCP port 53 is open between your server and SecondDNS. AXFR uses TCP.
 **Duplicate handlers after re-install:**
 The installer removes existing SecondDNS handlers before registering new ones. If you see duplicates, run the uninstaller first, then re-install.
 
+**IDN domain not syncing:**
+Verify `idn2` (or `idn`) is installed: `which idn2` or `which idn`. If not found, run the installer again or manually install `libidn2-bin` (Debian) / `libidn2` (RHEL).
+
+Check the log for the Punycode-converted domain name:
+```bash
+tail -f /var/log/seconddns.log | grep "Zone created"
+```
+IDN domains should appear as `xn--...` in the logs.
+
 **Test handler manually:**
 ```bash
 NEW_DOMAIN_NAME=example.com bash -c /usr/local/bin/seconddns-plesk-domain_create.sh
+```
+
+For IDN testing:
+```bash
+NEW_DOMAIN_NAME=каба-жаба.укр bash -c /usr/local/bin/seconddns-plesk-domain_create.sh
 ```
 
 ## Uninstall

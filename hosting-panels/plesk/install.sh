@@ -65,6 +65,29 @@ fi
 PLESK_VER=$(plesk version 2>/dev/null | head -1 || echo "unknown")
 echo "[+] Plesk detected: $PLESK_VER"
 
+# Install IDN utilities (for internationalized domain name support)
+echo "[*] Checking IDN utilities..."
+if ! command -v idn2 &>/dev/null && ! command -v idn &>/dev/null; then
+    echo "[*] Installing idn2 for IDN domain support..."
+    if command -v apt-get &>/dev/null; then
+        apt-get update -qq && apt-get install -y -qq libidn2-bin >/dev/null 2>&1 && {
+            echo "[+] idn2 installed"
+        } || {
+            echo "[!] Failed to install idn2 — IDN domains may not work"
+        }
+    elif command -v yum &>/dev/null; then
+        yum install -y libidn2 >/dev/null 2>&1 && {
+            echo "[+] idn2 installed"
+        } || {
+            echo "[!] Failed to install idn2 — IDN domains may not work"
+        }
+    else
+        echo "[!] Could not install idn2 — please install manually: apt-get install libidn2-bin (Debian/Ubuntu) or yum install libidn2 (RHEL/CentOS)"
+    fi
+else
+    echo "[+] IDN utilities already installed"
+fi
+
 # Verify API key
 echo "[*] Verifying API key..."
 curl -sf --max-time 10 \
