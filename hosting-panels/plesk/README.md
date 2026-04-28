@@ -25,10 +25,11 @@ For best results, IDN domains should be converted to Punycode format (e.g. `xn--
 - The installer attempts to install `idn2` (or `idn` as fallback) for automatic Punycode conversion
 - If installation fails, domains will still be synced but may not be converted
 - **For systems without idn2/idn:** Install manually using:
-  - Debian/Ubuntu: `apt-get install libidn2-bin`
-  - RHEL/CentOS: `yum install libidn2`
-  - Alpine: `apk add libidn2`
-  - Other distributions: search for `libidn2` or `libidn2-bin` package
+  - Debian/Ubuntu: `apt-get install idn2`
+  - AlmaLinux/Rocky (dnf): `dnf install idn2`
+  - RHEL/CentOS (yum): `yum install idn2`
+  - Alpine: `apk add libidn2-tools`
+  - Other distributions: search for `idn2` package
 
 ## Requirements
 
