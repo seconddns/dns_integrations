@@ -17,14 +17,18 @@ Handles all Plesk domain types: default domains (first in subscription), additio
 
 ## Internationalized Domain Names (IDN)
 
-The integration fully supports IDN domains (e.g. `каба-жаба.укр`, `münchen.de`, `中国.cn`).
+The integration supports IDN domains (e.g. `каба-жаба.укр`, `münchen.de`, `中国.cn`).
 
-IDN domains are automatically converted to Punycode format (e.g. `xn----7sbabacd2b5a.xn--j1amh`) before being synced to SecondDNS. This conversion is handled transparently by the event handlers.
+For best results, IDN domains should be converted to Punycode format (e.g. `xn----7sbabacd2b5a.xn--j1amh`) before being synced to SecondDNS.
 
-**Requirements for IDN support:**
-- The installer automatically installs `idn2` (or `idn` as fallback) if not already present
-- Supported on Debian/Ubuntu, RHEL/CentOS, and other Linux distributions with `apt-get` or `yum`
-- If your distribution uses a different package manager, manually install `libidn2-bin` (Debian) or `libidn2` (RHEL)
+**IDN utilities:**
+- The installer attempts to install `idn2` (or `idn` as fallback) for automatic Punycode conversion
+- If installation fails, domains will still be synced but may not be converted
+- **For systems without idn2/idn:** Install manually using:
+  - Debian/Ubuntu: `apt-get install libidn2-bin`
+  - RHEL/CentOS: `yum install libidn2`
+  - Alpine: `apk add libidn2`
+  - Other distributions: search for `libidn2` or `libidn2-bin` package
 
 ## Requirements
 
