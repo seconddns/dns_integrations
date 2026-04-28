@@ -21,6 +21,13 @@ ZONE_NAME="${OLD_DOMAIN_ALIAS_NAME:-$OLD_DOMAIN_NAME}"
 
 log "Zone deleted: $ZONE_NAME (plesk event handler)"
 
+# Convert IDN to Punycode if needed
+if command -v idn2 &> /dev/null; then
+    ZONE_NAME=$(idn2 --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
+elif command -v idn &> /dev/null; then
+    ZONE_NAME=$(idn --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
+fi
+
 # Find zone ID by name
 zone_id=$(curl -sf --max-time 10 \
     -H "X-API-Key: $API_KEY" \
