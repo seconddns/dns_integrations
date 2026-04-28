@@ -21,12 +21,13 @@ ZONE_NAME="${OLD_DOMAIN_ALIAS_NAME:-$OLD_DOMAIN_NAME}"
 
 log "Zone deleted: $ZONE_NAME (plesk event handler)"
 
-# Convert IDN to Punycode if needed
-if command -v idn2 &> /dev/null; then
+# Convert IDN to Punycode if idn2/idn is available
+if command -v idn2 &>/dev/null; then
     ZONE_NAME=$(idn2 --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
-elif command -v idn &> /dev/null; then
+elif command -v idn &>/dev/null; then
     ZONE_NAME=$(idn --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
 fi
+# If neither is available, the domain name is sent as-is (API will handle it)
 
 # Find zone ID by name
 zone_id=$(curl -sf --max-time 10 \
