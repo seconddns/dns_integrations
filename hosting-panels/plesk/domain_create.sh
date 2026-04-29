@@ -1,6 +1,7 @@
 #!/bin/bash
 # Copyright © 2025-2026 SecondDNS
-# Licensed under GNU General Public License v3.0 - see LICENSE file
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
 # SecondDNS integration — Plesk event handler
 # Triggered after a domain or domain alias is created
 # Env: NEW_DOMAIN_NAME, NEW_DOMAIN_ALIAS_NAME
