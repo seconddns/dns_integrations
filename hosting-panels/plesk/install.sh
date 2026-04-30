@@ -263,12 +263,11 @@ REGISTERED=0
 
 # Creation events: domains + domain aliases
 for ev in domain_create site_create domain_alias_create site_alias_create; do
-    plesk bin event_handler --create \
+    if plesk bin event_handler --create \
         -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
         -priority 10 \
         -user root \
-        -event "$ev" 2>/dev/null
-    if [ $? -eq 0 ]; then
+        -event "$ev" 2>/dev/null; then
         echo "[+] Registered handler: $ev"
         REGISTERED=$((REGISTERED+1))
     else
@@ -278,12 +277,11 @@ done
 
 # Rename events: domains + domain aliases
 for ev in domain_rename site_rename domain_alias_rename site_alias_rename; do
-    plesk bin event_handler --create \
+    if plesk bin event_handler --create \
         -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_rename.sh" \
         -priority 10 \
         -user root \
-        -event "$ev" 2>/dev/null
-    if [ $? -eq 0 ]; then
+        -event "$ev" 2>/dev/null; then
         echo "[+] Registered handler: $ev"
         REGISTERED=$((REGISTERED+1))
     else
@@ -293,12 +291,11 @@ done
 
 # Deletion events: domains + domain aliases
 for ev in domain_delete site_delete domain_alias_delete site_alias_delete; do
-    plesk bin event_handler --create \
+    if plesk bin event_handler --create \
         -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_delete.sh" \
         -priority 10 \
         -user root \
-        -event "$ev" 2>/dev/null
-    if [ $? -eq 0 ]; then
+        -event "$ev" 2>/dev/null; then
         echo "[+] Registered handler: $ev"
         REGISTERED=$((REGISTERED+1))
     else
