@@ -120,10 +120,10 @@ dig @ns2.seconddns.com example.com SOA +short
 | `site_delete` | Additional domain deleted | Remove zone |
 | `domain_alias_delete` | Default domain alias deleted | Remove zone |
 | `site_alias_delete` | Domain alias deleted | Remove zone |
-| `domain_rename` | Default domain renamed | Remove old zone, add new zone |
-| `site_rename` | Additional domain renamed | Remove old zone, add new zone |
-| `domain_alias_rename` | Default domain alias renamed | Remove old zone, add new zone |
-| `site_alias_rename` | Domain alias renamed | Remove old zone, add new zone |
+| `domain_update` | Default domain updated (fires on rename) | Remove old zone, add new zone |
+| `site_update` | Additional domain updated (fires on rename) | Remove old zone, add new zone |
+| `domain_alias_update` | Default domain alias updated (fires on rename) | Remove old zone, add new zone |
+| `site_alias_update` | Domain alias updated (fires on rename) | Remove old zone, add new zone |
 
 ## Troubleshooting
 

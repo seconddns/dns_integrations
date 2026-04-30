@@ -24,6 +24,8 @@ OLD_ZONE="${OLD_DOMAIN_ALIAS_NAME:-$OLD_DOMAIN_NAME}"
 NEW_ZONE="${NEW_DOMAIN_ALIAS_NAME:-$NEW_DOMAIN_NAME}"
 
 [ -z "$OLD_ZONE" ] || [ -z "$NEW_ZONE" ] && exit 0
+# Not a rename — domain_update fires for all changes, not only renames
+[ "$OLD_ZONE" = "$NEW_ZONE" ] && exit 0
 
 log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
 

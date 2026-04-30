@@ -275,8 +275,9 @@ for ev in domain_create site_create domain_alias_create site_alias_create; do
     fi
 done
 
-# Rename events: domains + domain aliases
-for ev in domain_rename site_rename domain_alias_rename site_alias_rename; do
+# Rename events: domain_update/site_update fire on any domain change,
+# including rename; domain_rename.sh exits early if OLD==NEW or OLD is unset.
+for ev in domain_update site_update domain_alias_update site_alias_update; do
     if plesk bin event_handler --create \
         -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_rename.sh" \
         -priority 10 \
