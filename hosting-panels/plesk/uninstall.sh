@@ -58,7 +58,7 @@ if command -v plesk &>/dev/null; then
 fi
 
 # Remove scripts
-for script in domain_create.sh domain_delete.sh; do
+for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     target="$SCRIPT_DIR/seconddns-plesk-${script}"
     if [ -f "$target" ]; then
         rm -f "$target"

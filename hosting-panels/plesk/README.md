@@ -1,15 +1,16 @@
 # SecondDNS — Plesk Hosting Panel Integration
 
-Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation, deletion, and domain aliases to SecondDNS via API + AXFR.
+Automatic secondary DNS for Plesk servers. Uses Plesk Event Manager to sync domain creation, deletion, rename, and domain aliases to SecondDNS via API + AXFR.
 
 Tested on Plesk Obsidian 18.0.77.2 (Ubuntu 24.04).
 
 ## How It Works
 
-Two shell scripts are registered as Plesk event handlers for 8 events:
+Three shell scripts are registered as Plesk event handlers for 12 events:
 
 1. **Domain/alias created** — calls SecondDNS API to register the zone
 2. **Domain/alias deleted** — removes the zone from SecondDNS
+3. **Domain/alias renamed** — removes the old zone and registers the new one
 
 After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND NOTIFY.
 
@@ -49,7 +50,7 @@ The installer:
 - Verifies the API key
 - Detects server IP (IPv4/IPv6)
 - Installs event handler scripts to `/usr/local/bin/`
-- Registers 8 Plesk event handlers via CLI
+- Registers 12 Plesk event handlers via CLI
 - Replaces default `ns2.<domain>` with secondary nameserver in DNS template
 - Configures BIND for AXFR (allow-transfer, also-notify)
 - Offers to sync existing domains
@@ -96,7 +97,7 @@ For existing domains, add the NS record through each domain's DNS settings or us
 ## Verification
 
 ```bash
-# Check registered handlers (should show 8)
+# Check registered handlers (should show 12)
 plesk bin event_handler --list | grep seconddns
 
 # Watch the log
@@ -119,6 +120,10 @@ dig @ns2.seconddns.com example.com SOA +short
 | `site_delete` | Additional domain deleted | Remove zone |
 | `domain_alias_delete` | Default domain alias deleted | Remove zone |
 | `site_alias_delete` | Domain alias deleted | Remove zone |
+| `domain_rename` | Default domain renamed | Remove old zone, add new zone |
+| `site_rename` | Additional domain renamed | Remove old zone, add new zone |
+| `domain_alias_rename` | Default domain alias renamed | Remove old zone, add new zone |
+| `site_alias_rename` | Domain alias renamed | Remove old zone, add new zone |
 
 ## Troubleshooting
 
@@ -149,6 +154,7 @@ IDN domains should appear as `xn--...` in the logs.
 **Test handler manually:**
 ```bash
 NEW_DOMAIN_NAME=example.com bash -c /usr/local/bin/seconddns-plesk-domain_create.sh
+OLD_DOMAIN_NAME=old.com NEW_DOMAIN_NAME=new.com bash -c /usr/local/bin/seconddns-plesk-domain_rename.sh
 ```
 
 For IDN testing:
@@ -171,4 +177,5 @@ Removes event handlers, scripts, and config. Zones on the secondary are not dele
 | `/etc/seconddns.conf` | API credentials and master IP |
 | `/usr/local/bin/seconddns-plesk-domain_create.sh` | Domain creation handler |
 | `/usr/local/bin/seconddns-plesk-domain_delete.sh` | Domain deletion handler |
+| `/usr/local/bin/seconddns-plesk-domain_rename.sh` | Domain rename handler |
 | `/var/log/seconddns.log` | Integration log |
