@@ -8,7 +8,7 @@ Integrations for [SecondDNS](https://seconddns.com) secondary DNS service.
 |-----------|-------------|
 | [hosting-panels/cyberpanel/](hosting-panels/cyberpanel/) | CyberPanel hosting panel — auto-sync zones on domain create/delete. Tested on CyberPanel v2.4.5 |
 | [hosting-panels/directadmin/](hosting-panels/directadmin/) | DirectAdmin hosting panel — auto-sync zones via dns_create_post / dns_delete_post. Tested on DA 1.699 |
-| [hosting-panels/plesk/](hosting-panels/plesk/) | Plesk hosting panel — auto-sync zones on domain create/delete via Event Manager |
+| [hosting-panels/plesk/](hosting-panels/plesk/) | Plesk hosting panel — auto-sync zones on domain create/delete/rename via Event Manager |
 
 ## Monitoring
 
