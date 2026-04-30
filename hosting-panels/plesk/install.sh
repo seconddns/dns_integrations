@@ -226,7 +226,7 @@ chmod 664 "$LOG_FILE"
 echo "[+] Log file: $LOG_FILE"
 
 # Install event handler scripts
-for script in domain_create.sh domain_delete.sh; do
+for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     curl -sf --max-time 10 -o "$SCRIPT_DIR/seconddns-plesk-${script}" "$REPO_URL/$script?t=$(date +%s)"
     chmod +x "$SCRIPT_DIR/seconddns-plesk-${script}"
     echo "[+] Installed: $SCRIPT_DIR/seconddns-plesk-${script}"
@@ -265,6 +265,21 @@ REGISTERED=0
 for ev in domain_create site_create domain_alias_create site_alias_create; do
     plesk bin event_handler --create \
         -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_create.sh" \
+        -priority 10 \
+        -user root \
+        -event "$ev" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo "[+] Registered handler: $ev"
+        REGISTERED=$((REGISTERED+1))
+    else
+        echo "[!] Failed to register handler for $ev"
+    fi
+done
+
+# Rename events: domains + domain aliases
+for ev in domain_rename site_rename domain_alias_rename site_alias_rename; do
+    plesk bin event_handler --create \
+        -command "bash -c $SCRIPT_DIR/seconddns-plesk-domain_rename.sh" \
         -priority 10 \
         -user root \
         -event "$ev" 2>/dev/null
@@ -440,6 +455,7 @@ echo ""
 echo "  Config:   $CONFIG_FILE"
 echo "  Scripts:  $SCRIPT_DIR/seconddns-plesk-domain_create.sh"
 echo "            $SCRIPT_DIR/seconddns-plesk-domain_delete.sh"
+echo "            $SCRIPT_DIR/seconddns-plesk-domain_rename.sh"
 echo "  Logs:     tail -f $LOG_FILE"
 echo ""
 echo "  Domains created/deleted in Plesk will be"
