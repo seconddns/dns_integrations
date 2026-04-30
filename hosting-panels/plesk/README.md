@@ -86,11 +86,25 @@ The installer automatically:
 - Adds the secondary nameserver (e.g. `ns2.seconddns.com`) to the DNS zone template
 - Offers to remove the default `ns2.<domain>` record (which points to the same server and provides no redundancy)
 
-To verify the current NS records in the template:
+> **Note:** The automatic replacement may not always succeed. After installation, verify the template manually using the steps below.
+
+**Step 1 — Verify NS records (Zone Records Template):**
+
+1. Go to **Tools & Settings** → **DNS Settings** → **Zone Records Template**
+2. Check the NS records. If a record with value `ns2.<domain>.` still exists, replace it with the SecondDNS nameserver shown in your SecondDNS dashboard (e.g. `ns2.seconddns.com.`)
+
+To inspect the current template records via CLI:
 
 ```bash
 plesk db "SELECT val FROM dns_recs_t WHERE type='NS'"
 ```
+
+**Step 2 — Set the primary nameserver (Zone Settings Template):**
+
+1. Go to **Tools & Settings** → **DNS Settings** → **Zone Settings Template**
+2. Find **Primary Name Server** and change it from `(Autoselect)` to `ns1.<domain>.`
+
+This ensures the SOA MNAME points to your Plesk server, not the secondary. Without this, the SOA primary nameserver field may be set to `ns2.seconddns.com.`, which is incorrect.
 
 For existing domains, add the NS record through each domain's DNS settings or use the Plesk mass update feature.
 
