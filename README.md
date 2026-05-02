@@ -9,17 +9,7 @@ Integrations for [SecondDNS](https://seconddns.com) — a secondary DNS service 
 
 ## How it works
 
-```
-Domain created in hosting panel
-         ↓
-Hook / Event handler (this repo)
-         ↓
-POST /api/zones → SecondDNS registers slave zone
-         ↓
-AXFR transfer: your master → SecondDNS secondary
-         ↓
-NOTIFY on every subsequent change → instant propagation
-```
+![Integration flow](doc/integration-flow.svg)
 
 All integrations use the same pattern: catch the panel event, call the SecondDNS API, let AXFR do the rest.
 
