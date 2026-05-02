@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 580" width="560" height="580">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#546e7a"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="560" height="580" fill="#f8f9fa" rx="12"/>
+
+  <!-- Section: Your Server -->
+  <rect x="20" y="14" width="520" height="212" rx="8" fill="none" stroke="#90a4ae" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="36" y="30" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="#90a4ae" font-weight="600" letter-spacing="0.5">YOUR SERVER</text>
+
+  <!-- Box 1: Hosting Panel -->
+  <rect x="100" y="40" width="360" height="54" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="280" y="62" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Hosting Panel</text>
+  <text x="280" y="82" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#1565c0">Domain or zone created / deleted</text>
+
+  <!-- Arrow 1 -->
+  <line x1="280" y1="94" x2="280" y2="114" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="108" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#78909c">signal / hook</text>
+
+  <!-- Box 2: Event Handler -->
+  <rect x="100" y="116" width="360" height="54" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="280" y="138" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#0d47a1">Event Handler</text>
+  <text x="280" y="158" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#1565c0">Hook / Django signal / Event Manager script</text>
+
+  <!-- Arrow 2 -->
+  <line x1="280" y1="170" x2="280" y2="190" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="184" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#78909c">HTTPS</text>
+
+  <!-- Section divider label -->
+  <line x1="60" y1="232" x2="500" y2="232" stroke="#cfd8dc" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Section: SecondDNS -->
+  <rect x="20" y="240" width="520" height="130" rx="8" fill="none" stroke="#ffb74d" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="36" y="256" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="#ffb74d" font-weight="600" letter-spacing="0.5">SECONDDNS</text>
+
+  <!-- Box 3: API -->
+  <rect x="100" y="192" width="360" height="54" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="280" y="214" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#e65100">SecondDNS API</text>
+  <text x="280" y="234" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#bf360c">POST /api/zones — register slave zone</text>
+
+  <!-- Arrow 3 -->
+  <line x1="280" y1="246" x2="280" y2="266" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Box 4: Slave zone -->
+  <rect x="100" y="268" width="360" height="54" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="280" y="290" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#e65100">Slave Zone Created</text>
+  <text x="280" y="310" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#bf360c">SecondDNS schedules AXFR from your master</text>
+
+  <!-- Arrow 4 -->
+  <line x1="280" y1="322" x2="280" y2="342" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="336" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#78909c">TCP 53</text>
+
+  <!-- Box 5: AXFR -->
+  <rect x="100" y="344" width="360" height="54" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="280" y="366" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#1b5e20">AXFR Zone Transfer</text>
+  <text x="280" y="386" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#2e7d32">Your master DNS &#x2192; SecondDNS secondary</text>
+
+  <!-- Arrow 5 -->
+  <line x1="280" y1="398" x2="280" y2="418" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="412" font-family="system-ui, -apple-system, sans-serif" font-size="10" fill="#78909c">NOTIFY</text>
+
+  <!-- Box 6: Active -->
+  <rect x="100" y="420" width="360" height="54" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="280" y="442" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#1b5e20">Zone Active on Secondary</text>
+  <text x="280" y="462" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#2e7d32">Subsequent changes propagate instantly via NOTIFY</text>
+
+  <!-- Bottom note -->
+  <text x="280" y="506" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" fill="#90a4ae">All panel integrations follow this same pattern</text>
+</svg>
