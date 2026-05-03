@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 600" width="560" height="600">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#546e7a"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="560" height="600" fill="#f8f9fa" rx="12"/>
+
+  <!-- Section: YOUR SERVER -->
+  <rect x="16" y="16" width="528" height="320" rx="8" fill="none" stroke="#90a4ae" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="30" y="31" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#90a4ae" font-weight="600" letter-spacing="0.5">YOUR SERVER — DirectAdmin + BIND / PowerDNS</text>
+
+  <!-- Row 1: Domain event -->
+  <rect x="100" y="42" width="360" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="280" y="64" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Domain Event in DirectAdmin</text>
+  <text x="280" y="82" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">Domain created or deleted</text>
+
+  <!-- Arrow 1 -->
+  <line x1="280" y1="94" x2="280" y2="112" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="107" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">hook trigger</text>
+
+  <!-- Row 2: Hook scripts -->
+  <rect x="100" y="114" width="360" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="280" y="136" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#0d47a1">DirectAdmin Hook Script</text>
+  <text x="280" y="154" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">dns_create_post.sh &#x00B7; dns_delete_post.sh</text>
+
+  <!-- Arrow 2 -->
+  <line x1="280" y1="166" x2="280" y2="184" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 3: Hook reads env vars + calls curl -->
+  <rect x="100" y="186" width="360" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="280" y="208" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Script Runs</text>
+  <text x="280" y="226" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">Reads $domain from DirectAdmin env vars</text>
+
+  <!-- Arrow 3 -->
+  <line x1="280" y1="238" x2="280" y2="256" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="251" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">HTTPS</text>
+
+  <!-- Row 4: API call -->
+  <rect x="100" y="258" width="360" height="52" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="280" y="280" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#1b5e20">SecondDNS API</text>
+  <text x="280" y="298" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#2e7d32">POST /api/zones (create) &#x00B7; DELETE /api/zones/{id} (delete)</text>
+
+  <!-- Section: SECONDDNS -->
+  <rect x="16" y="352" width="528" height="228" rx="8" fill="none" stroke="#ffb74d" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="30" y="367" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#ffb74d" font-weight="600" letter-spacing="0.5">SECONDDNS</text>
+
+  <!-- Arrow 4→5 crosses section boundary -->
+  <line x1="280" y1="310" x2="280" y2="372" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 5: Zone registered -->
+  <rect x="100" y="374" width="360" height="52" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="280" y="396" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#e65100">Zone Registered / Removed</text>
+  <text x="280" y="414" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#bf360c">Slave zone created or deleted on SecondDNS</text>
+
+  <!-- Arrow 5 -->
+  <line x1="280" y1="426" x2="280" y2="444" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="439" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">TCP 53</text>
+
+  <!-- Row 6: AXFR -->
+  <rect x="100" y="446" width="360" height="52" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="280" y="468" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#e65100">AXFR Zone Transfer</text>
+  <text x="280" y="486" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#bf360c">DirectAdmin BIND / PowerDNS &#x2192; SecondDNS</text>
+
+  <!-- Arrow 6 -->
+  <line x1="280" y1="498" x2="280" y2="516" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="286" y="511" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">NOTIFY</text>
+
+  <!-- Row 7: Active -->
+  <rect x="100" y="518" width="360" height="52" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="280" y="540" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Zone Active on Secondary</text>
+  <text x="280" y="558" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#2e7d32">Subsequent changes propagate instantly via NOTIFY</text>
+
+  <!-- Bottom note -->
+  <text x="280" y="592" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#90a4ae">AXFR requires TCP port 53 open from SecondDNS to your server</text>
+</svg>

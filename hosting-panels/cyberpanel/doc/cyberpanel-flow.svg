@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 650" width="600" height="650">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#546e7a"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="650" fill="#f8f9fa" rx="12"/>
+
+  <!-- Section: YOUR SERVER -->
+  <rect x="16" y="16" width="568" height="318" rx="8" fill="none" stroke="#90a4ae" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="30" y="31" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#90a4ae" font-weight="600" letter-spacing="0.5">YOUR SERVER — CyberPanel + PowerDNS</text>
+
+  <!-- Row 1: Two signal entry points side by side -->
+  <!-- Left box: Website signals -->
+  <rect x="36" y="42" width="240" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="156" y="64" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="12" font-weight="700" fill="#0d47a1">Website Signals</text>
+  <text x="156" y="82" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">postWebsiteCreation / postDomainCreation</text>
+
+  <!-- Right box: DNS zone signals -->
+  <rect x="324" y="42" width="240" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="444" y="64" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="12" font-weight="700" fill="#0d47a1">DNS Zone Signals</text>
+  <text x="444" y="82" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">postZoneCreation</text>
+
+  <!-- Converging arrows to Row 2 -->
+  <line x1="156" y1="94" x2="290" y2="156" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="444" y1="94" x2="310" y2="156" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 2: Plugin handler -->
+  <rect x="120" y="158" width="360" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="300" y="180" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#0d47a1">seconddns_plugin.py</text>
+  <text x="300" y="198" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">on_zone_created()</text>
+
+  <!-- Arrow 2 -->
+  <line x1="300" y1="210" x2="300" y2="228" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 3: Zone preparation -->
+  <rect x="120" y="230" width="360" height="52" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="300" y="252" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#0d47a1">Zone Preparation</text>
+  <text x="300" y="270" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#1565c0">Zone type: NATIVE &#x2192; MASTER &#x00B7; SOA serial updated</text>
+
+  <!-- Arrow 3 -->
+  <line x1="300" y1="282" x2="300" y2="300" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="306" y="295" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">HTTPS</text>
+
+  <!-- Row 4: API call (still on your server side) -->
+  <rect x="120" y="302" width="360" height="52" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="300" y="324" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#1b5e20">SecondDNS API</text>
+  <text x="300" y="342" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#2e7d32">POST /api/zones — register slave zone</text>
+
+  <!-- Section: SECONDDNS -->
+  <rect x="16" y="376" width="568" height="252" rx="8" fill="none" stroke="#ffb74d" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="30" y="391" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#ffb74d" font-weight="600" letter-spacing="0.5">SECONDDNS</text>
+
+  <!-- Arrow 3→4 crosses section boundary -->
+  <line x1="300" y1="354" x2="300" y2="396" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Row 5: Slave zone created -->
+  <rect x="120" y="398" width="360" height="52" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="300" y="420" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#e65100">Slave Zone Created</text>
+  <text x="300" y="438" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#bf360c">SecondDNS schedules AXFR from master IP</text>
+
+  <!-- Arrow 5 -->
+  <line x1="300" y1="450" x2="300" y2="468" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="306" y="463" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">TCP 53</text>
+
+  <!-- Row 6: AXFR -->
+  <rect x="120" y="470" width="360" height="52" rx="8" fill="#fff8e1" stroke="#f57c00" stroke-width="1.5"/>
+  <text x="300" y="492" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#e65100">AXFR Zone Transfer</text>
+  <text x="300" y="510" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#bf360c">CyberPanel PowerDNS (MASTER) &#x2192; SecondDNS</text>
+
+  <!-- Arrow 6 -->
+  <line x1="300" y1="522" x2="300" y2="540" stroke="#546e7a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="306" y="535" font-family="system-ui,-apple-system,sans-serif" font-size="10" fill="#78909c">NOTIFY</text>
+
+  <!-- Row 7: Zone active -->
+  <rect x="120" y="542" width="360" height="52" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+  <text x="300" y="564" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#1b5e20">Zone Active on Secondary</text>
+  <text x="300" y="582" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#2e7d32">Subsequent changes propagate instantly via NOTIFY</text>
+
+  <!-- Bottom note -->
+  <text x="300" y="622" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="11" fill="#90a4ae">On deletion: plugin calls DELETE /api/zones/{id} — zone removed from secondary</text>
+</svg>

@@ -15,17 +15,7 @@ See [INSTALL.md](INSTALL.md) for options, troubleshooting, and uninstall instruc
 
 ## How It Works
 
-```
-Domain/zone created in CyberPanel
-       ↓
-Django signal (postWebsiteCreation / postZoneCreation)
-       ↓
-seconddns_plugin.py:
-  1. Changes zone type NATIVE → MASTER (so AXFR works)
-  2. POST /api/zones → SecondDNS creates slave zone
-       ↓
-AXFR transfer from your master to SecondDNS
-```
+![How It Works](doc/cyberpanel-flow.svg)
 
 Listens to both website signals (`postWebsiteCreation`, `postWebsiteDeletion`) and DNS zone signals (`postZoneCreation`, `postSubmitZoneDeletion`) — covers domain creation from any CyberPanel UI path.
 
