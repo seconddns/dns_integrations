@@ -6,6 +6,8 @@ Tested on Plesk Obsidian 18.0.77.2 (Ubuntu 24.04).
 
 ## How It Works
 
+![How It Works](doc/plesk-flow.svg)
+
 Three shell scripts are registered as Plesk event handlers for 12 events:
 
 1. **Domain/alias created** — calls SecondDNS API to register the zone

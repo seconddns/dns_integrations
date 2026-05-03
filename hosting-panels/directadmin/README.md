@@ -4,6 +4,8 @@ Automatically sync DNS zones from DirectAdmin to SecondDNS via AXFR zone transfe
 
 ## How it works
 
+![How it works](doc/directadmin-flow.svg)
+
 DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/developer/hooks/dns.html) that run after DNS events. This integration installs two hooks:
 
 - **dns_create_post.sh** — when a domain is created, adds the zone to SecondDNS
