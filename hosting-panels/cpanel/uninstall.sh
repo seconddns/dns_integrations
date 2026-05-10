@@ -57,6 +57,36 @@ for script in domain_create.sh domain_delete.sh; do
     fi
 done
 
+# Remove secondary NS from zone templates
+ZONE_TEMPLATE_DIR="/var/cpanel/zonetemplates"
+CONFIG="/etc/seconddns.conf"
+if [ -d "$ZONE_TEMPLATE_DIR" ]; then
+    API_URL_CONF=$(grep "^api_url" "$CONFIG" 2>/dev/null | sed 's/^api_url\s*=\s*//')
+    API_KEY_CONF=$(grep "^api_key" "$CONFIG" 2>/dev/null | sed 's/^api_key\s*=\s*//')
+    API_NS_CONF=""
+    if [ -n "$API_URL_CONF" ] && [ -n "$API_KEY_CONF" ]; then
+        API_NS_CONF=$(curl -sf --max-time 10 \
+            -H "X-API-Key: $API_KEY_CONF" \
+            -H "User-Agent: SecondDNS-cPanel/1.0" \
+            "$API_URL_CONF/api/server-info" 2>/dev/null | \
+            python3 -c "import sys,json; ns=json.load(sys.stdin).get('nameservers',[]); print(ns[0] if ns else '')" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$API_NS_CONF" ]; then
+        echo "[*] Removing NS records from zone templates..."
+        for tmpl in "$ZONE_TEMPLATE_DIR"/*; do
+            [ -f "$tmpl" ] || continue
+            if grep -qF "$API_NS_CONF" "$tmpl" 2>/dev/null; then
+                sed -i "/$API_NS_CONF/d" "$tmpl"
+                echo "[+] Removed NS from template: $(basename "$tmpl")"
+            fi
+        done
+    else
+        echo "[!] Could not fetch NS name — remove SecondDNS NS entries from"
+        echo "    $ZONE_TEMPLATE_DIR manually via WHM > DNS Functions > Edit Zone Templates"
+    fi
+fi
+
 # Optionally remove config
 if [ -f /etc/seconddns.conf ]; then
     if confirm "Remove /etc/seconddns.conf?"; then
