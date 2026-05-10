@@ -15,15 +15,6 @@ Two shell scripts are registered as WHM hooks for 4 events:
 
 After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND NOTIFY.
 
-## Internationalized Domain Names (IDN)
-
-The integration supports IDN domains (e.g. `münchen.de`, `中国.cn`). The installer attempts to install `idn2` for automatic Punycode conversion.
-
-**Install manually if needed:**
-- AlmaLinux/Rocky: `dnf install idn2`
-- RHEL/CentOS: `yum install idn2`
-- Ubuntu/Debian: `apt-get install idn2`
-
 ## Requirements
 
 - cPanel/WHM (v82+)
