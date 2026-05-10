@@ -263,71 +263,180 @@ fi
 
 echo "[+] Registered $REGISTERED hooks"
 
+# DNS backend detection
+echo ""
+echo "--- DNS server detection ---"
+
+DNS_BACKEND=""
+for _cfg in /var/cpanel/cpanel.config /usr/local/cpanel/etc/cpanel.config; do
+    if [ -f "$_cfg" ]; then
+        _ns=$(grep "^nameservertype" "$_cfg" 2>/dev/null | sed 's/nameservertype=//' | tr -d ' ')
+        [ -n "$_ns" ] && DNS_BACKEND="$_ns" && break
+    fi
+done
+
+if [ -z "$DNS_BACKEND" ]; then
+    if pgrep -x pdns_server &>/dev/null 2>&1 || systemctl is-active pdns &>/dev/null 2>&1; then
+        DNS_BACKEND="powerdns"
+    else
+        DNS_BACKEND="bind"
+    fi
+fi
+
+case "$DNS_BACKEND" in
+    *powerdns*|*pdns*) DNS_BACKEND="powerdns" ;;
+    *) DNS_BACKEND="bind" ;;
+esac
+
+echo "[+] Detected DNS server: $DNS_BACKEND"
+
+if [ "$AUTO_YES" -ne 1 ] && [ -e /dev/tty ]; then
+    _ALT="$([ "$DNS_BACKEND" = "bind" ] && echo "p=PowerDNS" || echo "b=BIND")"
+    read -p "    Configure AXFR for ${DNS_BACKEND}? [Y/n/${_ALT}/s=skip] " -n 1 -r _DNS_CHOICE < /dev/tty
+    echo
+    case "$_DNS_CHOICE" in
+        b|B) DNS_BACKEND="bind" ;;
+        p|P) DNS_BACKEND="powerdns" ;;
+        n|N|s|S) DNS_BACKEND="" ;;
+    esac
+fi
+
 # AXFR configuration
 echo ""
 echo "--- AXFR configuration ---"
 
 if [ -z "$DNS_IPS" ]; then
     echo "[!] No secondary DNS IP — configure AXFR manually"
+elif [ -z "$DNS_BACKEND" ]; then
+    echo "[!] AXFR configuration skipped"
 else
     SECONDARY_IP="${DNS_IPS%%,*}"
     echo "[+] Secondary DNS IP: $SECONDARY_IP"
 
-    NAMED_CONF=""
-    for f in /etc/named.conf /etc/bind/named.conf; do
-        [ -f "$f" ] && NAMED_CONF="$f" && break
-    done
-
-    if [ -n "$NAMED_CONF" ]; then
-        echo "[=] Detected BIND config: $NAMED_CONF"
-
-        NEEDS_FIX=0
-        grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF" 2>/dev/null || NEEDS_FIX=1
-        grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF" 2>/dev/null || NEEDS_FIX=1
-
-        if [ "$NEEDS_FIX" -eq 1 ]; then
-            if confirm "Add allow-transfer and also-notify for $SECONDARY_IP to $NAMED_CONF?"; then
-                cp "$NAMED_CONF" "${NAMED_CONF}.bak.$(date +%s)"
-
-                if grep -q "allow-transfer" "$NAMED_CONF"; then
-                    sed -i '/allow-transfer/s/none;//g' "$NAMED_CONF"
-                    if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF"; then
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_CONF"
-                    fi
-                else
-                    sed -i "/^[[:space:]]*};/i\\
-\\tallow-transfer { $SECONDARY_IP; };" "$NAMED_CONF"
-                fi
-
-                if grep -q "also-notify" "$NAMED_CONF"; then
-                    sed -i '/also-notify/s/none;//g' "$NAMED_CONF"
-                    if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_CONF"
-                    fi
-                else
-                    sed -i "/^[[:space:]]*};/i\\
-\\talso-notify { $SECONDARY_IP; };" "$NAMED_CONF"
-                fi
-
-                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true
-                echo "[+] BIND configured and reloaded"
-            fi
+    if [ "$DNS_BACKEND" = "powerdns" ]; then
+        # --- PowerDNS ---
+        PDNS_CONF="/etc/pdns/pdns.conf"
+        if [ ! -f "$PDNS_CONF" ]; then
+            echo "[!] pdns.conf not found at $PDNS_CONF — configure AXFR manually"
         else
-            echo "[+] BIND AXFR config already includes $SECONDARY_IP"
-        fi
-    fi
+            cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
 
-    echo ""
-    echo -e "\033[1;33m[!] IMPORTANT: cPanel may overwrite direct named.conf changes.\033[0m"
-    echo -e "\033[1;33m    To make AXFR settings permanent, add them in WHM:\033[0m"
-    echo ""
-    echo -e "    \033[1mWHM > Service Configuration > DNS Server (BIND)\033[0m"
-    echo -e "    \033[1m> Additional zone configuration:\033[0m"
-    echo ""
-    echo -e "      \033[1;32mallow-transfer { $SECONDARY_IP; };\033[0m"
-    echo -e "      \033[1;32malso-notify { $SECONDARY_IP; };\033[0m"
-    echo ""
-    echo -e "    \033[1;33mThen click Save.\033[0m"
+            # primary / master mode (name differs by pdns version)
+            if grep -q "^master=" "$PDNS_CONF" 2>/dev/null; then
+                sed -i "s|^master=.*|master=yes|" "$PDNS_CONF"
+                echo "[+] PowerDNS: master=yes"
+            elif grep -q "^primary=" "$PDNS_CONF" 2>/dev/null; then
+                sed -i "s|^primary=.*|primary=yes|" "$PDNS_CONF"
+                echo "[+] PowerDNS: primary=yes"
+            else
+                echo "primary=yes" >> "$PDNS_CONF"
+                echo "[+] PowerDNS: primary=yes (added)"
+            fi
+
+            # disable-axfr=no
+            if grep -q "^disable-axfr=" "$PDNS_CONF" 2>/dev/null; then
+                sed -i "s|^disable-axfr=.*|disable-axfr=no|" "$PDNS_CONF"
+            else
+                echo "disable-axfr=no" >> "$PDNS_CONF"
+            fi
+            echo "[+] PowerDNS: disable-axfr=no"
+
+            # allow-axfr-ips
+            if grep -q "^allow-axfr-ips=" "$PDNS_CONF" 2>/dev/null; then
+                _cur=$(grep "^allow-axfr-ips=" "$PDNS_CONF" | sed 's/allow-axfr-ips=//')
+                if echo "$_cur" | grep -qF "$SECONDARY_IP"; then
+                    echo "[=] allow-axfr-ips already includes $SECONDARY_IP"
+                else
+                    sed -i "s|^allow-axfr-ips=.*|allow-axfr-ips=${_cur},${SECONDARY_IP}|" "$PDNS_CONF"
+                    echo "[+] PowerDNS: allow-axfr-ips updated"
+                fi
+            else
+                echo "allow-axfr-ips=$SECONDARY_IP" >> "$PDNS_CONF"
+                echo "[+] PowerDNS: allow-axfr-ips=$SECONDARY_IP"
+            fi
+
+            # also-notify
+            if grep -q "^also-notify=" "$PDNS_CONF" 2>/dev/null; then
+                _cur=$(grep "^also-notify=" "$PDNS_CONF" | sed 's/also-notify=//')
+                if echo "$_cur" | grep -qF "$SECONDARY_IP"; then
+                    echo "[=] also-notify already includes $SECONDARY_IP"
+                else
+                    sed -i "s|^also-notify=.*|also-notify=${_cur},${SECONDARY_IP}|" "$PDNS_CONF"
+                    echo "[+] PowerDNS: also-notify updated"
+                fi
+            else
+                echo "also-notify=$SECONDARY_IP" >> "$PDNS_CONF"
+                echo "[+] PowerDNS: also-notify=$SECONDARY_IP"
+            fi
+
+            # Reload
+            if systemctl reload pdns &>/dev/null 2>&1; then
+                echo "[+] PowerDNS reloaded"
+            elif pdns_control reload &>/dev/null 2>&1; then
+                echo "[+] PowerDNS reloaded via pdns_control"
+            else
+                echo "[!] Restart PowerDNS manually: systemctl restart pdns"
+            fi
+        fi
+
+    else
+        # --- BIND ---
+        NAMED_CONF=""
+        for f in /etc/named.conf /etc/bind/named.conf; do
+            [ -f "$f" ] && NAMED_CONF="$f" && break
+        done
+
+        if [ -n "$NAMED_CONF" ]; then
+            echo "[=] Detected BIND config: $NAMED_CONF"
+
+            NEEDS_FIX=0
+            grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF" 2>/dev/null || NEEDS_FIX=1
+            grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF" 2>/dev/null || NEEDS_FIX=1
+
+            if [ "$NEEDS_FIX" -eq 1 ]; then
+                if confirm "Add allow-transfer and also-notify for $SECONDARY_IP to $NAMED_CONF?"; then
+                    cp "$NAMED_CONF" "${NAMED_CONF}.bak.$(date +%s)"
+
+                    if grep -q "allow-transfer" "$NAMED_CONF"; then
+                        sed -i '/allow-transfer/s/none;//g' "$NAMED_CONF"
+                        if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF"; then
+                            sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_CONF"
+                        fi
+                    else
+                        sed -i "/^[[:space:]]*};/i\\
+\\tallow-transfer { $SECONDARY_IP; };" "$NAMED_CONF"
+                    fi
+
+                    if grep -q "also-notify" "$NAMED_CONF"; then
+                        sed -i '/also-notify/s/none;//g' "$NAMED_CONF"
+                        if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF"; then
+                            sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_CONF"
+                        fi
+                    else
+                        sed -i "/^[[:space:]]*};/i\\
+\\talso-notify { $SECONDARY_IP; };" "$NAMED_CONF"
+                    fi
+
+                    rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true
+                    echo "[+] BIND configured and reloaded"
+                fi
+            else
+                echo "[+] BIND AXFR config already includes $SECONDARY_IP"
+            fi
+        fi
+
+        echo ""
+        echo -e "\033[1;33m[!] IMPORTANT: cPanel may overwrite direct named.conf changes.\033[0m"
+        echo -e "\033[1;33m    To make AXFR settings permanent, add them in WHM:\033[0m"
+        echo ""
+        echo -e "    \033[1mWHM > Service Configuration > DNS Server (BIND)\033[0m"
+        echo -e "    \033[1m> Additional zone configuration:\033[0m"
+        echo ""
+        echo -e "      \033[1;32mallow-transfer { $SECONDARY_IP; };\033[0m"
+        echo -e "      \033[1;32malso-notify { $SECONDARY_IP; };\033[0m"
+        echo ""
+        echo -e "    \033[1;33mThen click Save.\033[0m"
+    fi
 fi
 
 # Zone template — add secondary NS record
@@ -412,12 +521,12 @@ echo "  cPanel accounts created/deleted in WHM will be"
 echo "  automatically synced to your secondary DNS."
 echo ""
 echo "  Verify hooks:  $HOOKS_BIN list"
-if [ -n "$DNS_IPS" ]; then
+if [ -n "$DNS_IPS" ] && [ "$DNS_BACKEND" = "bind" ]; then
     SECONDARY_IP="${DNS_IPS%%,*}"
     echo ""
-    echo -e "\033[1;33m[!] Don't forget to configure AXFR in WHM:\033[0m"
+    echo -e "\033[1;33m[!] Don't forget to make AXFR permanent in WHM:\033[0m"
     echo -e "    WHM > Service Configuration > DNS Server (BIND)"
-    echo -e "    Additional zone configuration:"
+    echo -e "    > Additional zone configuration:"
     echo -e "      allow-transfer { $SECONDARY_IP; };"
     echo -e "      also-notify { $SECONDARY_IP; };"
 fi
