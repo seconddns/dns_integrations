@@ -1,0 +1,115 @@
+# SecondDNS — cPanel/WHM Hosting Panel Integration
+
+Automatic secondary DNS for cPanel/WHM servers. Uses the cPanel Standardized Hooks system to sync domain creation and deletion to SecondDNS via API + AXFR.
+
+## How It Works
+
+Two shell scripts are registered as WHM hooks for 4 events:
+
+1. **Account created** (`Whostmgr::Accounts::Create`) — calls SecondDNS API to register the zone
+2. **Account removed** (`Whostmgr::Accounts::Remove`) — removes the zone from SecondDNS
+3. **Addon domain added** (`Api2::AddonDomain::addaddon`) — registers the addon domain zone
+4. **Addon domain deleted** (`Api2::AddonDomain::deladdondomain`) — removes the addon domain zone
+
+After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND NOTIFY.
+
+## Internationalized Domain Names (IDN)
+
+The integration supports IDN domains (e.g. `münchen.de`, `中国.cn`). The installer attempts to install `idn2` for automatic Punycode conversion.
+
+**Install manually if needed:**
+- AlmaLinux/Rocky: `dnf install idn2`
+- RHEL/CentOS: `yum install idn2`
+- Ubuntu/Debian: `apt-get install idn2`
+
+## Requirements
+
+- cPanel/WHM (v82+)
+- Root access
+- BIND as DNS server (default in cPanel)
+- TCP port 53 open to SecondDNS
+- SecondDNS API key (get one at seconddns.com/dashboard/api-key)
+
+## Installation
+
+```bash
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel/install.sh | bash -s -- --api-key=YOUR_API_KEY
+```
+
+The installer:
+- Verifies the API key
+- Detects server IP (IPv4/IPv6)
+- Installs hook scripts to `/usr/local/bin/`
+- Registers 4 WHM hooks via `manage_hooks`
+- Configures BIND for AXFR (allow-transfer, also-notify)
+- Offers to sync existing cPanel accounts
+
+### Options
+
+| Option | Description |
+|:---|:---|
+| `--api-key=KEY` | Your SecondDNS API key (required) |
+| `--api-url=URL` | API base URL (default: `https://seconddns.com`) |
+| `--master-ip=IP` | Primary DNS server IP (default: auto-detect) |
+| `--yes` | Skip confirmation prompts |
+
+### One-liner with options
+
+```bash
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel/install.sh \
+  | bash -s -- --api-key=YOUR_KEY --master-ip=1.2.3.4 --yes
+```
+
+## AXFR Configuration
+
+The installer attempts to configure BIND (`/etc/named.conf`) but **cPanel may overwrite direct changes**.
+
+To make AXFR settings permanent, add them in WHM:
+
+**WHM > Service Configuration > DNS Server (BIND) > Additional zone configuration:**
+
+```
+allow-transfer { <SecondDNS_IP>; };
+also-notify { <SecondDNS_IP>; };
+```
+
+Then click **Save**.
+
+## Uninstall
+
+```bash
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel/uninstall.sh | bash
+```
+
+Or run the local copy:
+
+```bash
+bash uninstall.sh
+```
+
+## Troubleshooting
+
+| Issue | Solution |
+|:---|:---|
+| Hook not firing | Check `manage_hooks list` and verify script is executable |
+| Zone not synced | Check `/var/log/seconddns.log` |
+| AXFR failing | Verify `allow-transfer` in WHM > DNS Server settings |
+| Domain not found on delete | Zone may have already been removed; check log for `[~]` entries |
+
+**View logs:**
+```bash
+tail -f /var/log/seconddns.log
+```
+
+**List registered hooks:**
+```bash
+/usr/local/cpanel/bin/manage_hooks list
+```
+
+**Manual zone sync:**
+```bash
+curl -X POST https://seconddns.com/api/zones \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"example.com","masterIp":"1.2.3.4"}'
+```
