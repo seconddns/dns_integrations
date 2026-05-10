@@ -19,6 +19,7 @@ All integrations use the same pattern: catch the panel event, call the SecondDNS
 
 | Panel | Mechanism | Tested on |
 |:------|:----------|:----------|
+| [cPanel/WHM](hosting-panels/cpanel/) | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
 | [CyberPanel](hosting-panels/cyberpanel/) | Django signals (`postWebsiteCreation`, `postZoneCreation`) | CyberPanel 2.4.5 |
 | [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`) | DirectAdmin 1.699 |
 | [Plesk](hosting-panels/plesk/) | Event Manager (12 events, incl. rename + aliases) | Plesk Obsidian 18.0.77.2 |
@@ -28,16 +29,20 @@ All integrations use the same pattern: catch the panel event, call the SecondDNS
 All installers accept `--api-key=YOUR_API_KEY` and are safe to run as root:
 
 ```bash
+# cPanel/WHM
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel/install.sh \
+  | bash -s -- --api-key=YOUR_API_KEY
+
 # CyberPanel
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/cyberpanel/install.sh \
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cyberpanel/install.sh \
   | bash -s -- --api-key=YOUR_API_KEY
 
 # DirectAdmin
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/directadmin/install.sh \
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/directadmin/install.sh \
   | bash -s -- --api-key=YOUR_API_KEY
 
 # Plesk
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/install.sh \
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/plesk/install.sh \
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
