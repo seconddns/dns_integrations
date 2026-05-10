@@ -1,5 +1,7 @@
 # SecondDNS — cPanel/WHM Hosting Panel Integration
 
+> **Status: Beta — actively tested. Use in production at your own risk. Feedback welcome.**
+
 Automatic secondary DNS for cPanel/WHM servers. Uses the cPanel Standardized Hooks system to sync domain creation and deletion to SecondDNS via API + AXFR.
 
 ## How It Works
