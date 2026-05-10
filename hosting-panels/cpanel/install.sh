@@ -69,48 +69,6 @@ fi
 CPANEL_VER=$(cat /usr/local/cpanel/version 2>/dev/null || echo "unknown")
 echo "[+] cPanel detected: $CPANEL_VER"
 
-# Install IDN utilities
-echo "[*] Checking IDN utilities..."
-if ! command -v idn2 &>/dev/null && ! command -v idn &>/dev/null; then
-    echo "[*] Installing idn2 for IDN domain support..."
-    IDN_INSTALLED=0
-
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="$ID"
-    fi
-
-    case "$OS_ID" in
-        ubuntu|debian)
-            apt-get update -qq 2>/dev/null
-            apt-get install -y -qq idn2 2>/dev/null && IDN_INSTALLED=1
-            ;;
-        fedora|rhel|centos|almalinux|rocky)
-            if command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-        *)
-            if command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-    esac
-
-    if [ "$IDN_INSTALLED" -eq 1 ] && (command -v idn2 &>/dev/null || command -v idn &>/dev/null); then
-        echo "[+] IDN utilities installed successfully"
-    else
-        echo "[!] Warning: Could not install IDN utilities"
-        echo "    Install manually: dnf install idn2  or  yum install idn2"
-    fi
-else
-    echo "[+] IDN utilities already installed"
-fi
-
 # Verify API key
 echo "[*] Verifying API key..."
 curl -sf --max-time 10 \
@@ -486,10 +444,6 @@ if confirm "Sync existing cPanel accounts to secondary DNS now?"; then
             [ -f "$user_file" ] || continue
             sdomain=$(grep "^DNS=" "$user_file" 2>/dev/null | cut -d= -f2)
             [ -z "$sdomain" ] && continue
-
-            if command -v idn2 &>/dev/null; then
-                sdomain=$(idn2 --quiet "$sdomain" 2>/dev/null || echo "$sdomain")
-            fi
 
             response=$(curl -sf --max-time 15 \
                 -X POST \

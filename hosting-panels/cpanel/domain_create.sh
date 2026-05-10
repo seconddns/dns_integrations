@@ -32,12 +32,7 @@ except Exception:
 
 [ -z "$ZONE_NAME" ] && exit 0
 
-# Convert IDN to Punycode if idn2/idn is available
-if command -v idn2 &>/dev/null; then
-    ZONE_NAME=$(idn2 --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
-elif command -v idn &>/dev/null; then
-    ZONE_NAME=$(idn --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
-fi
+# cPanel stores all domains in Punycode internally — no IDN conversion needed
 
 log "Zone created: $ZONE_NAME (cpanel hook)"
 
