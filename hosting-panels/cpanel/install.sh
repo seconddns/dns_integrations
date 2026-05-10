@@ -330,17 +330,36 @@ else
     echo -e "    \033[1;33mThen click Save.\033[0m"
 fi
 
-# NS record configuration
+# Zone template — add secondary NS record
+ZONE_TEMPLATE_DIR="/var/cpanel/zonetemplates"
 if [ -n "$API_NS" ]; then
     echo ""
-    echo "--- Nameserver configuration ---"
-    echo ""
-    echo -e "\033[1;33m[!] To add $API_NS as a secondary nameserver to all new zones:\033[0m"
-    echo ""
-    echo -e "    \033[1mWHM > DNS Functions > Edit DNS Zone\033[0m"
-    echo -e "    or set a default NS template in:"
-    echo -e "    \033[1mWHM > Server Configuration > Basic cPanel & WHM Setup\033[0m"
-    echo -e "    \033[1m> Nameservers section\033[0m"
+    echo "--- Zone template NS configuration ---"
+
+    # Ensure trailing dot (FQDN in zone files)
+    NS_FQDN="${API_NS%%.}."
+
+    if [ -d "$ZONE_TEMPLATE_DIR" ]; then
+        TMPL_UPDATED=0
+        for tmpl in "$ZONE_TEMPLATE_DIR"/*; do
+            [ -f "$tmpl" ] || continue
+            if grep -qF "$API_NS" "$tmpl" 2>/dev/null; then
+                echo "[=] NS already present: $(basename "$tmpl")"
+            else
+                printf '\n%%nsttl%%\tIN\tNS\t%s\n' "$NS_FQDN" >> "$tmpl"
+                echo "[+] Added NS to template: $(basename "$tmpl")"
+                TMPL_UPDATED=$((TMPL_UPDATED+1))
+            fi
+        done
+        if [ "$TMPL_UPDATED" -gt 0 ]; then
+            echo "[+] Zone templates updated — new zones will include $NS_FQDN as NS"
+            echo "    Note: existing zones are not affected; resync them via the SecondDNS dashboard."
+        fi
+    else
+        echo "[!] $ZONE_TEMPLATE_DIR not found — add NS record manually in:"
+        echo "    WHM > DNS Functions > Edit Zone Templates"
+        echo "    Line to add: %nsttl%  IN  NS  ${NS_FQDN}"
+    fi
 fi
 
 # Initial sync
