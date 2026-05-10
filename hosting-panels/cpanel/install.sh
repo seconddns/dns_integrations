@@ -291,14 +291,17 @@ esac
 echo "[+] Detected DNS server: $DNS_BACKEND"
 
 if [ "$AUTO_YES" -ne 1 ] && [ -e /dev/tty ]; then
-    _ALT="$([ "$DNS_BACKEND" = "bind" ] && echo "p=PowerDNS" || echo "b=BIND")"
-    read -p "    Configure AXFR for ${DNS_BACKEND}? [Y/n/${_ALT}/s=skip] " -n 1 -r _DNS_CHOICE < /dev/tty
-    echo
-    case "$_DNS_CHOICE" in
-        b|B) DNS_BACKEND="bind" ;;
-        p|P) DNS_BACKEND="powerdns" ;;
-        n|N|s|S) DNS_BACKEND="" ;;
-    esac
+    _ALT="$([ "$DNS_BACKEND" = "bind" ] && echo "PowerDNS" || echo "BIND")"
+    _ALT_KEY="$([ "$DNS_BACKEND" = "bind" ] && echo "powerdns" || echo "bind")"
+    if confirm "Configure AXFR for ${DNS_BACKEND}?"; then
+        : # proceed with detected backend
+    else
+        if confirm "Are you sure your DNS server is ${_ALT}?"; then
+            DNS_BACKEND="$_ALT_KEY"
+        else
+            DNS_BACKEND=""
+        fi
+    fi
 fi
 
 # AXFR configuration
