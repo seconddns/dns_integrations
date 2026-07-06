@@ -43,41 +43,10 @@ idn_encode() {
 OLD_ZONE=$(idn_encode "$OLD_ZONE")
 NEW_ZONE=$(idn_encode "$NEW_ZONE")
 
-# Delete old zone
-zone_id=$(curl -sf --max-time 10 \
-    -H "X-API-Key: $API_KEY" \
-    -H "User-Agent: SecondDNS-Plesk/1.0" \
-    "$API_URL/api/zones/by-name/$OLD_ZONE" 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-
-if [ -n "$zone_id" ]; then
-    curl -sf --max-time 15 \
-        -X DELETE \
-        -H "X-API-Key: $API_KEY" \
-        -H "User-Agent: SecondDNS-Plesk/1.0" \
-        "$API_URL/api/zones/$zone_id" 2>/dev/null
-    if [ $? -eq 0 ]; then
-        log "[+] Old zone $OLD_ZONE removed from SecondDNS"
-    else
-        log "[!] Failed to remove old zone $OLD_ZONE from SecondDNS"
-    fi
-else
-    log "[~] Old zone $OLD_ZONE not found in SecondDNS (skipping delete)"
-fi
-
-# Create new zone
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-Plesk/1.0" \
-    -d "{\"name\":\"$NEW_ZONE\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] New zone $NEW_ZONE added to SecondDNS"
-else
-    log "[!] Failed to add new zone $NEW_ZONE to SecondDNS"
-fi
+QUEUE="/usr/local/bin/seconddns-queue"
+"$QUEUE" enqueue delete "$OLD_ZONE"
+"$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"
+log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
+( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

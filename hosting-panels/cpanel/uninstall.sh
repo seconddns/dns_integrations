@@ -100,3 +100,7 @@ echo "=== Uninstall complete ==="
 echo ""
 echo "  Note: AXFR settings in WHM and BIND config must be removed manually."
 echo "  Verify: $HOOKS_BIN list"
+
+# Remove offline queue
+rm -f /usr/local/bin/seconddns-queue /etc/cron.d/seconddns-queue
+rm -rf /var/lib/seconddns

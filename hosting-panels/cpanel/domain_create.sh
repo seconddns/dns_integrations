@@ -36,18 +36,9 @@ except Exception:
 
 log "Zone created: $ZONE_NAME (cpanel hook)"
 
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-cPanel/1.0" \
-    -d "{\"name\":\"$ZONE_NAME\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] Zone $ZONE_NAME added to SecondDNS"
-else
-    log "[!] Failed to add zone $ZONE_NAME to SecondDNS"
-fi
+QUEUE="/usr/local/bin/seconddns-queue"
+"$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"
+log "[>] Zone $ZONE_NAME queued for SecondDNS"
+( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

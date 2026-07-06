@@ -171,6 +171,22 @@ for script in domain_create.sh domain_delete.sh; do
     echo "[+] Installed: $SCRIPT_DIR/seconddns-cpanel-${script}"
 done
 
+# --- Offline operation queue ---
+echo ""
+echo "--- Installing offline operation queue ---"
+QUEUE_URL="${REPO_URL%/*}/common/seconddns-queue"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$QUEUE_URL?t=$(date +%s)"
+chmod +x /usr/local/bin/seconddns-queue
+mkdir -p /var/lib/seconddns
+if ! command -v sqlite3 &>/dev/null; then
+    echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
+fi
+cat > /etc/cron.d/seconddns-queue << 'CRONEOF'
+* * * * * root /usr/local/bin/seconddns-queue flush >/dev/null 2>&1
+CRONEOF
+chmod 644 /etc/cron.d/seconddns-queue
+echo "[+] Queue tool: /usr/local/bin/seconddns-queue (cron flush every minute)"
+
 # Register hooks
 echo ""
 echo "--- Registering cPanel/WHM hooks ---"
