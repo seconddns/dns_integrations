@@ -87,3 +87,7 @@ echo "=== Uninstall complete ==="
 echo ""
 echo "Note: DNS zones on SecondDNS were NOT removed."
 echo "Delete them manually via Dashboard or API if needed."
+
+# Remove offline queue
+rm -f /usr/local/bin/seconddns-queue /etc/cron.d/seconddns-queue
+rm -rf /var/lib/seconddns

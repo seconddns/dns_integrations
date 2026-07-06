@@ -28,19 +28,9 @@ esac
 
 log "Zone created: $domain (caller=$caller, user=$username)"
 
-# Add zone to SecondDNS
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-DirectAdmin/1.0" \
-    -d "{\"name\":\"$domain\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] Zone $domain added to SecondDNS"
-else
-    log "[!] Failed to add zone $domain to SecondDNS"
-fi
+QUEUE="/usr/local/bin/seconddns-queue"
+"$QUEUE" enqueue create "$domain" "$MASTER_IP"
+log "[>] Zone $domain queued for SecondDNS"
+( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

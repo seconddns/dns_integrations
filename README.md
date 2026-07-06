@@ -48,6 +48,33 @@ curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosti
 
 See the README in each directory for options, AXFR configuration, and troubleshooting.
 
+### Offline operation queue
+
+Every panel integration ships with a local offline queue
+([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
+Zone operations are enqueued into a SQLite database
+(`/var/lib/seconddns/queue.db`) and delivered immediately; if the SecondDNS API
+is unreachable (outage or maintenance), the operations stay queued and a cron
+job (`/etc/cron.d/seconddns-queue`, every minute) replays them in strict FIFO
+order once the API is back. Nothing your customers do in the panel during a
+SecondDNS downtime is lost.
+
+Replay semantics:
+
+- retryable errors (timeout, 5xx, redirects) stop the drain until the next cron tick
+- duplicate delivery is safe: `409` on create and `404` on delete count as success
+- hard errors (`400`/`422`) mark the operation `failed` and the drain continues
+
+Inspect the queue on any panel server:
+
+```bash
+seconddns-queue status          # pending / failed / oldest age (exit 0/1/2)
+seconddns-queue status --json   # same as JSON (for monitoring agents)
+seconddns-queue flush           # force an immediate drain
+```
+
+Requires `sqlite3` (present by default on all supported panels).
+
 ---
 
 ## Monitoring
@@ -55,7 +82,9 @@ See the README in each directory for options, AXFR configuration, and troublesho
 | Tool | Type | What it checks |
 |:-----|:-----|:---------------|
 | [Nagios / Icinga](nagios_plugins/) | Check plugin (bash) | Zone sync status, stale zones, master reachability |
+| [Nagios / Icinga](nagios_plugins/check_seconddns_queue.sh) | Check plugin (bash) | Offline queue backlog on a panel server (`-w`/`-c` age thresholds) |
 | [Zabbix](zabbix_templates/) | HTTP Agent template | Zone counters, triggers, graphs — no agent required |
+| [Zabbix](zabbix_templates/seconddns_queue.yaml) | Agent template | Offline queue backlog on a panel server (needs a `UserParameter`) |
 
 Both integrations use the SecondDNS API key. See the README in each directory for installation and configuration.
 

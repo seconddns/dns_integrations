@@ -31,3 +31,7 @@ echo ""
 echo "=== Uninstall complete ==="
 echo "  Log file kept at: $LOG_FILE"
 echo "  Your zones on the secondary DNS are not deleted automatically."
+
+# Remove offline queue
+rm -f /usr/local/bin/seconddns-queue /etc/cron.d/seconddns-queue
+rm -rf /var/lib/seconddns

@@ -1,0 +1,100 @@
+zabbix_export:
+  version: "7.0"
+  template_groups:
+    - uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates/Applications
+
+  templates:
+    - uuid: a1b2c3d4e5f60000000000000000dns2
+      template: SecondDNS Offline Queue
+      name: SecondDNS Offline Operation Queue
+      description: |
+        Monitors the local SecondDNS offline operation queue on a panel server
+        (Plesk / cPanel / DirectAdmin / CyberPanel integration).
+        A growing or stale queue means zone operations are not reaching the
+        SecondDNS API (outage or maintenance on the SecondDNS side, or a local
+        delivery problem such as a bad API key or firewall).
+
+        Requires the Zabbix agent UserParameter on the panel server:
+          UserParameter=seconddns.queue.json,/usr/local/bin/seconddns-queue status --json
+      groups:
+        - name: Templates/Applications
+
+      macros:
+        - macro: "{$SECONDDNS_QUEUE_WARN_AGE}"
+          value: "600"
+          description: "WARNING when the oldest pending op is older (seconds)"
+        - macro: "{$SECONDDNS_QUEUE_CRIT_AGE}"
+          value: "1800"
+          description: "CRITICAL when the oldest pending op is older (seconds)"
+
+      items:
+        - uuid: a1b2c3d4e5f60000000000000000qit1
+          name: "SecondDNS queue: status JSON"
+          type: ZABBIX_ACTIVE
+          key: seconddns.queue.json
+          value_type: TEXT
+          delay: 1m
+          history: 7d
+          description: Raw JSON from seconddns-queue status --json
+
+        - uuid: a1b2c3d4e5f60000000000000000qit2
+          name: "SecondDNS queue: pending operations"
+          type: DEPENDENT
+          key: seconddns.queue.pending
+          master_item:
+            key: seconddns.queue.json
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.pending
+          history: 30d
+
+        - uuid: a1b2c3d4e5f60000000000000000qit3
+          name: "SecondDNS queue: failed operations"
+          type: DEPENDENT
+          key: seconddns.queue.failed
+          master_item:
+            key: seconddns.queue.json
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.failed
+          history: 30d
+
+        - uuid: a1b2c3d4e5f60000000000000000qit4
+          name: "SecondDNS queue: oldest pending op age"
+          type: DEPENDENT
+          key: seconddns.queue.oldest_age
+          master_item:
+            key: seconddns.queue.json
+          value_type: UNSIGNED
+          units: s
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.oldest_age_seconds
+          history: 30d
+
+      triggers:
+        - uuid: a1b2c3d4e5f60000000000000000qtr1
+          expression: "last(/SecondDNS Offline Queue/seconddns.queue.oldest_age)>{$SECONDDNS_QUEUE_CRIT_AGE}"
+          name: "SecondDNS: zone operations stuck in queue (>{$SECONDDNS_QUEUE_CRIT_AGE}s)"
+          priority: HIGH
+          description: "The SecondDNS API has been unreachable for a long time; queued zone operations are not being delivered."
+
+        - uuid: a1b2c3d4e5f60000000000000000qtr2
+          expression: "last(/SecondDNS Offline Queue/seconddns.queue.oldest_age)>{$SECONDDNS_QUEUE_WARN_AGE}"
+          name: "SecondDNS: zone operations queued (>{$SECONDDNS_QUEUE_WARN_AGE}s)"
+          priority: WARNING
+          dependencies:
+            - name: "SecondDNS: zone operations stuck in queue (>{$SECONDDNS_QUEUE_CRIT_AGE}s)"
+              expression: "last(/SecondDNS Offline Queue/seconddns.queue.oldest_age)>{$SECONDDNS_QUEUE_CRIT_AGE}"
+
+        - uuid: a1b2c3d4e5f60000000000000000qtr3
+          expression: "last(/SecondDNS Offline Queue/seconddns.queue.failed)>0"
+          name: "SecondDNS: permanently failed zone operations in queue"
+          priority: WARNING
+          description: "Operations rejected by the API (4xx) need manual review: seconddns-queue status; see /var/log/seconddns.log."
