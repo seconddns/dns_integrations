@@ -52,25 +52,37 @@ See the README in each directory for options, AXFR configuration, and troublesho
 
 Every panel integration ships with a local offline queue
 ([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
-Zone operations are enqueued into a SQLite database
-(`/var/lib/seconddns/queue.db`) and delivered immediately; if the SecondDNS API
-is unreachable (outage or maintenance), the operations stay queued and a cron
-job (`/etc/cron.d/seconddns-queue`, every minute) replays them in strict FIFO
-order once the API is back. Nothing your customers do in the panel during a
-SecondDNS downtime is lost.
+Panel hooks enqueue zone operations into a SQLite database
+(`/var/lib/seconddns/queue.db`); the `seconddns-queued` systemd worker is the
+single delivery path — it watches the queue and delivers operations in strict
+FIFO order. If the SecondDNS API is unreachable (outage or maintenance), the
+worker backs off exponentially and retries until everything is delivered.
+Nothing your customers do in the panel during a SecondDNS downtime is lost,
+and hooks never block on API timeouts (they only do a local INSERT).
+
+Worker settings (optional `[queue]` section in `/etc/seconddns.conf`):
+
+```ini
+[queue]
+poll_interval = 3      # seconds between queue checks when idle
+http_timeout = 15      # seconds per API request
+backoff_min = 30       # first retry delay when the API is down
+backoff_max = 300      # retry delay ceiling
+```
 
 Replay semantics:
 
-- retryable errors (timeout, 5xx, redirects) stop the drain until the next cron tick
+- retryable errors (timeout, 5xx, redirects) pause delivery; the worker retries with exponential backoff
 - duplicate delivery is safe: `409` on create and `404` on delete count as success
 - hard errors (`400`/`422`) mark the operation `failed` and the drain continues
 
 Inspect the queue on any panel server:
 
 ```bash
-seconddns-queue status          # pending / failed / oldest age (exit 0/1/2)
-seconddns-queue status --json   # same as JSON (for monitoring agents)
-seconddns-queue flush           # force an immediate drain
+seconddns-queue status              # pending / failed / oldest age (exit 0/1/2)
+seconddns-queue status --json       # same as JSON (for monitoring agents)
+seconddns-queue flush               # manual one-shot drain (diagnostics)
+systemctl status seconddns-queued   # delivery worker
 ```
 
 Requires `sqlite3` (present by default on all supported panels).

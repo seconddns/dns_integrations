@@ -110,19 +110,14 @@ def api_request(config, method, path, data=None):
 QUEUE_BIN = "/usr/local/bin/seconddns-queue"
 
 
-def _retryable(status):
-    """API unreachable, 5xx or maintenance redirect — worth retrying later."""
-    return status == 0 or status >= 500 or 300 <= status < 400
-
-
 def queue_op(op, domain, master_ip=""):
-    """Persist the operation in the local offline queue for cron replay."""
+    """Persist the operation in the local offline queue.
+
+    The seconddns-queued systemd worker delivers it in FIFO order."""
     try:
         subprocess.run([QUEUE_BIN, "enqueue", op, domain, master_ip],
                        check=True, timeout=10)
-        subprocess.Popen([QUEUE_BIN, "flush"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        logger.info("    API unavailable — %s %s queued for later delivery", op, domain)
+        logger.info("    %s %s queued for delivery", op, domain)
         return True
     except Exception as e:
         logger.error("    Failed to enqueue %s %s: %s", op, domain, e)
@@ -142,22 +137,7 @@ def add_zone(config, domain):
     if not config or not config.get("master_ip"):
         return False
     logger.info("[+] Adding zone: %s (master: %s)", domain, config["master_ip"])
-    result = api_request(config, "POST", "/api/zones", {
-        "name": domain,
-        "masterIp": config["master_ip"],
-    })
-    if result and result.get("_status"):
-        status = result["_status"]
-        error = result.get("error", "Unknown error")
-        if status == 409:
-            logger.info("    Already exists, skipping.")
-            return True
-        if _retryable(status):
-            return queue_op("create", domain, config["master_ip"])
-        logger.error("    Error (%s): %s", status, error)
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("create", domain, config["master_ip"])
 
 
 def find_zone_by_name(config, domain):
@@ -169,25 +149,8 @@ def find_zone_by_name(config, domain):
 
 def remove_zone(config, domain):
     domain = domain.lower().rstrip(".")
-    lookup = api_request(config, "GET", f"/api/zones/by-name/{domain}")
-    status = lookup.get("_status") if isinstance(lookup, dict) else None
-    if status:
-        if status == 404:
-            logger.info("[-] Zone %s not found on secondary DNS.", domain)
-            return False
-        if _retryable(status):
-            return queue_op("delete", domain)
-        logger.error("    Error (%s): %s", status, lookup.get("error", str(lookup)))
-        return False
     logger.info("[-] Removing zone: %s", domain)
-    result = api_request(config, "DELETE", f"/api/zones/{lookup['id']}")
-    if result and result.get("_status"):
-        if _retryable(result["_status"]):
-            return queue_op("delete", domain)
-        logger.error("    Error (%s): %s", result.get("_status"), result.get("error", str(result)))
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("delete", domain)
 
 
 def get_cyberpanel_domains():

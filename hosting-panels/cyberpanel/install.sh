@@ -222,17 +222,18 @@ with open(p, 'w') as f: f.write(c)
     cp "$CYBER_SRC/seconddns-signals.service" "$SYSTEMD_SERVICE"
 
 # --- Offline operation queue ---
-cp "$WORK_DIR/dns_integrations/hosting-panels/common/seconddns-queue" /usr/local/bin/seconddns-queue
-chmod +x /usr/local/bin/seconddns-queue
+COMMON_SRC="$WORK_DIR/dns_integrations/hosting-panels/common"
+cp "$COMMON_SRC/seconddns-queue" /usr/local/bin/seconddns-queue
+cp "$COMMON_SRC/seconddns-queued" /usr/local/bin/seconddns-queued
+cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.service
+chmod +x /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 mkdir -p /var/lib/seconddns
 if ! command -v sqlite3 &>/dev/null; then
     echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
 fi
-cat > /etc/cron.d/seconddns-queue << 'CRONEOF'
-* * * * * root /usr/local/bin/seconddns-queue flush >/dev/null 2>&1
-CRONEOF
-chmod 644 /etc/cron.d/seconddns-queue
-echo "[+] Queue tool: /usr/local/bin/seconddns-queue (cron flush every minute)"
+systemctl daemon-reload
+systemctl enable --now seconddns-queued.service
+echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
     systemctl daemon-reload
     systemctl enable seconddns-signals.service 2>/dev/null
     echo "[+] Systemd hook installed (survives CyberPanel updates)"

@@ -39,6 +39,5 @@ log "Zone created: $ZONE_NAME (cpanel hook)"
 QUEUE="/usr/local/bin/seconddns-queue"
 "$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"
 log "[>] Zone $ZONE_NAME queued for SecondDNS"
-( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0
