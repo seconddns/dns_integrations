@@ -24,6 +24,5 @@ log "Zone deleted: $domain (user=$USERNAME)"
 QUEUE="/usr/local/bin/seconddns-queue"
 "$QUEUE" enqueue delete "$domain"
 log "[>] Zone $domain removal queued for SecondDNS"
-( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

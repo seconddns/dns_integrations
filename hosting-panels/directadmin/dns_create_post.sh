@@ -31,6 +31,5 @@ log "Zone created: $domain (caller=$caller, user=$username)"
 QUEUE="/usr/local/bin/seconddns-queue"
 "$QUEUE" enqueue create "$domain" "$MASTER_IP"
 log "[>] Zone $domain queued for SecondDNS"
-( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

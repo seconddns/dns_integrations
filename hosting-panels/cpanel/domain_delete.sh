@@ -37,6 +37,5 @@ log "Zone deleted: $ZONE_NAME (cpanel hook)"
 QUEUE="/usr/local/bin/seconddns-queue"
 "$QUEUE" enqueue delete "$ZONE_NAME"
 log "[>] Zone $ZONE_NAME removal queued for SecondDNS"
-( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0

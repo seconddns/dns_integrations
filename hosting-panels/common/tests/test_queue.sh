@@ -11,6 +11,8 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 QUEUE="$HERE/../seconddns-queue"
+WORKER="$HERE/../seconddns-queued"
+export SECONDDNS_QUEUED_BIN="$WORKER"
 TMP="$(mktemp -d)"
 PORT=8899
 
@@ -24,6 +26,12 @@ cat > "$SECONDDNS_CONF" <<EOF
 api_url = http://127.0.0.1:$PORT
 api_key = test-key
 master_ip = 192.0.2.10
+
+[queue]
+poll_interval = 1
+http_timeout = 5
+backoff_min = 1
+backoff_max = 2
 EOF
 
 PASS=0; FAIL=0
@@ -92,7 +100,7 @@ assert_eq "$(pending)" 2 "two ops pending"
 
 echo "== 2. API down: drain stops, order kept"
 echo down > "$TMP/mode"
-"$QUEUE" flush
+"$QUEUE" flush || true
 assert_eq "$(pending)" 2 "nothing lost while API is down"
 attempts=$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT attempts FROM ops ORDER BY id LIMIT 1;")
 assert_eq "$attempts" 1 "first op attempt counted"
@@ -141,6 +149,19 @@ assert_eq "$(pending)" 20 "all 20 concurrent enqueues persisted"
 echo ok > "$TMP/mode"
 "$QUEUE" flush
 assert_eq "$(pending)" 0 "all 20 drained"
+
+echo "== 8. daemon mode: picks up new ops and survives an outage"
+echo down > "$TMP/mode"
+"$WORKER" & DPID=$!
+sleep 1
+"$QUEUE" enqueue create daemon1.example.com 192.0.2.10
+"$QUEUE" enqueue create daemon2.example.com 192.0.2.10
+sleep 2
+assert_eq "$(pending)" 2 "ops wait while API is down"
+echo ok > "$TMP/mode"
+for i in $(seq 1 15); do [ "$(pending)" = 0 ] && break; sleep 1; done
+assert_eq "$(pending)" 0 "daemon drained the queue after API recovery"
+kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
 
 echo
 echo "passed: $PASS, failed: $FAIL"

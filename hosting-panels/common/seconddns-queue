@@ -2,33 +2,28 @@
 # Copyright © 2025-2026 SecondDNS
 # Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
-# SecondDNS offline operation queue.
+# SecondDNS offline operation queue — CLI.
 #
-# Panel hooks enqueue every zone operation here and immediately trigger a
-# flush. If the SecondDNS API is unreachable (outage or maintenance), the
-# operation stays in a local SQLite queue and is replayed by cron in strict
-# FIFO order once the API is back.
+# Panel hooks enqueue zone operations into a local SQLite queue; the
+# seconddns-queued systemd worker delivers them to the SecondDNS API in
+# strict FIFO order (surviving outages and maintenance windows).
 #
 # Usage:
 #   seconddns-queue enqueue <create|delete> <domain> [master_ip]
-#   seconddns-queue flush
+#   seconddns-queue flush             # manual one-shot drain (diagnostics)
 #   seconddns-queue status [--json]
 #
 # Exit codes for status: 0 = empty/healthy, 1 = pending backlog, 2 = failed ops
 #
 # Environment overrides (mainly for tests):
-#   SECONDDNS_CONF        config file    (default /etc/seconddns.conf)
 #   SECONDDNS_QUEUE_DB    sqlite db path (default /var/lib/seconddns/queue.db)
-#   SECONDDNS_QUEUE_LOCK  flush lockfile (default /var/lib/seconddns/queue.lock)
 #   SECONDDNS_LOG         log file       (default /var/log/seconddns.log)
 
 set -u
 
-CONFIG="${SECONDDNS_CONF:-/etc/seconddns.conf}"
 QDB="${SECONDDNS_QUEUE_DB:-/var/lib/seconddns/queue.db}"
-QLOCK="${SECONDDNS_QUEUE_LOCK:-/var/lib/seconddns/queue.lock}"
 LOG="${SECONDDNS_LOG:-/var/log/seconddns.log}"
-UA="SecondDNS-Queue/1.0"
+WORKER="${SECONDDNS_QUEUED_BIN:-/usr/local/bin/seconddns-queued}"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
@@ -51,128 +46,11 @@ init_db() {
         );" >/dev/null
 }
 
-read_conf() {
-    [ -f "$CONFIG" ] || { log "[!] queue: config $CONFIG missing"; exit 0; }
-    API_URL=$(sed -nE 's/^api_url[[:space:]]*=[[:space:]]*//p' "$CONFIG")
-    API_KEY=$(sed -nE 's/^api_key[[:space:]]*=[[:space:]]*//p' "$CONFIG")
-    [ -z "$API_URL" ] || [ -z "$API_KEY" ] && { log "[!] queue: api_url/api_key not configured"; exit 0; }
-}
-
-# api_call METHOD PATH [JSON_BODY] -> sets HTTP_CODE and HTTP_BODY
-api_call() {
-    local method="$1" path="$2" body="${3:-}"
-    local out
-    if [ -n "$body" ]; then
-        out=$(curl -s --max-time 15 -w '\n%{http_code}' \
-            -X "$method" \
-            -H "X-API-Key: $API_KEY" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: $UA" \
-            -d "$body" \
-            "$API_URL$path" 2>/dev/null)
-    else
-        out=$(curl -s --max-time 15 -w '\n%{http_code}' \
-            -X "$method" \
-            -H "X-API-Key: $API_KEY" \
-            -H "User-Agent: $UA" \
-            "$API_URL$path" 2>/dev/null)
-    fi
-    HTTP_CODE=$(echo "$out" | tail -n1)
-    HTTP_BODY=$(echo "$out" | sed '$d')
-    [ -z "$HTTP_CODE" ] && HTTP_CODE=000
-}
-
-# Attempt one operation. Return: 0 done (success), 1 retryable failure, 2 hard failure.
-send_op() {
-    local op="$1" domain="$2" master_ip="$3"
-    case "$op" in
-      create)
-        api_call POST "/api/zones" "{\"name\":\"$domain\",\"masterIp\":\"$master_ip\"}"
-        case "$HTTP_CODE" in
-          200|201) return 0 ;;
-          409) log "[~] queue: zone $domain already exists (treated as success)"; return 0 ;;
-          400|422) return 2 ;;
-          *) return 1 ;;
-        esac
-        ;;
-      delete)
-        api_call GET "/api/zones/by-name/$domain"
-        case "$HTTP_CODE" in
-          200) ;;
-          404) log "[~] queue: zone $domain already absent (treated as success)"; return 0 ;;
-          400|422) return 2 ;;
-          *) return 1 ;;
-        esac
-        local zone_id
-        zone_id=$(echo "$HTTP_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-        [ -z "$zone_id" ] && return 1
-        api_call DELETE "/api/zones/$zone_id"
-        case "$HTTP_CODE" in
-          200|204) return 0 ;;
-          404) return 0 ;;
-          400|422) return 2 ;;
-          *) return 1 ;;
-        esac
-        ;;
-      *)
-        return 2 ;;
-    esac
-}
-
 cmd_enqueue() {
     local op="$1" domain="$2" master_ip="${3:-}"
     init_db
     sq "INSERT INTO ops (op, domain, master_ip) VALUES ('$op', '$domain', '$master_ip');" >/dev/null
     log "[>] queue: enqueued $op $domain"
-}
-
-cmd_flush() {
-    init_db
-    read_conf
-    # single flusher at a time; strict FIFO requires it
-    if command -v flock >/dev/null 2>&1; then
-        exec 9>"$QLOCK"
-        flock -n 9 || exit 0
-    else
-        # portable fallback (no flock, e.g. macOS): mkdir lock with stale-PID check
-        if ! mkdir "$QLOCK.d" 2>/dev/null; then
-            local lock_pid
-            lock_pid=$(cat "$QLOCK.d/pid" 2>/dev/null)
-            if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
-                exit 0
-            fi
-            rm -rf "$QLOCK.d"
-            mkdir "$QLOCK.d" 2>/dev/null || exit 0
-        fi
-        echo $$ > "$QLOCK.d/pid"
-        trap 'rm -rf "$QLOCK.d"' EXIT
-    fi
-
-    while :; do
-        local row
-        row=$(sq -separator '|' "SELECT id, op, domain, IFNULL(master_ip,'') FROM ops WHERE status='pending' ORDER BY id LIMIT 1;")
-        [ -z "$row" ] && break
-        local id op domain master_ip
-        IFS='|' read -r id op domain master_ip <<< "$row"
-
-        send_op "$op" "$domain" "$master_ip"
-        case $? in
-          0)
-            sq "DELETE FROM ops WHERE id=$id;" >/dev/null
-            log "[+] queue: delivered $op $domain"
-            ;;
-          2)
-            sq "UPDATE ops SET status='failed', attempts=attempts+1, last_error='HTTP $HTTP_CODE' WHERE id=$id;" >/dev/null
-            log "[!] queue: $op $domain permanently failed (HTTP $HTTP_CODE), marked failed"
-            ;;
-          *)
-            # API unreachable / 5xx / maintenance: stop, keep FIFO order, retry next tick
-            sq "UPDATE ops SET attempts=attempts+1, last_error='HTTP $HTTP_CODE' WHERE id=$id;" >/dev/null
-            log "[~] queue: API unavailable (HTTP $HTTP_CODE), $(sq "SELECT COUNT(*) FROM ops WHERE status='pending';") op(s) waiting"
-            break
-            ;;
-        esac
-    done
 }
 
 cmd_status() {
@@ -196,7 +74,7 @@ case "${1:-}" in
     [ $# -ge 3 ] || { echo "usage: $0 enqueue <create|delete> <domain> [master_ip]" >&2; exit 1; }
     cmd_enqueue "$2" "$3" "${4:-}"
     ;;
-  flush)  cmd_flush ;;
+  flush)  exec "$WORKER" --once ;;
   status) cmd_status "${2:-}" ;;
   *)
     echo "usage: $0 enqueue|flush|status" >&2

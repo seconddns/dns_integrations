@@ -89,5 +89,8 @@ echo "Note: DNS zones on SecondDNS were NOT removed."
 echo "Delete them manually via Dashboard or API if needed."
 
 # Remove offline queue
-rm -f /usr/local/bin/seconddns-queue /etc/cron.d/seconddns-queue
+systemctl disable --now seconddns-queued.service 2>/dev/null
+rm -f /etc/systemd/system/seconddns-queued.service
+systemctl daemon-reload 2>/dev/null
+rm -f /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 rm -rf /var/lib/seconddns

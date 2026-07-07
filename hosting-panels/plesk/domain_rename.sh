@@ -47,6 +47,5 @@ QUEUE="/usr/local/bin/seconddns-queue"
 "$QUEUE" enqueue delete "$OLD_ZONE"
 "$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"
 log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
-( "$QUEUE" flush >/dev/null 2>&1 & )
 
 exit 0
