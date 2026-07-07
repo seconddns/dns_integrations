@@ -22,6 +22,7 @@
 set -u
 
 QDB="${SECONDDNS_QUEUE_DB:-/var/lib/seconddns/queue.db}"
+QSOCK="${SECONDDNS_QUEUE_SOCK:-/var/lib/seconddns/queued.sock}"
 LOG="${SECONDDNS_LOG:-/var/log/seconddns.log}"
 WORKER="${SECONDDNS_QUEUED_BIN:-/usr/local/bin/seconddns-queued}"
 
@@ -51,6 +52,13 @@ cmd_enqueue() {
     init_db
     sq "INSERT INTO ops (op, domain, master_ip) VALUES ('$op', '$domain', '$master_ip');" >/dev/null
     log "[>] queue: enqueued $op $domain"
+    # wake the delivery worker instantly (best-effort)
+    python3 -c "
+import socket, os
+os.chdir(os.path.dirname('$QSOCK') or '.')  # AF_UNIX ~104-byte path limit
+s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+s.sendto(b'1', os.path.basename('$QSOCK'))
+" 2>/dev/null || true
 }
 
 cmd_status() {

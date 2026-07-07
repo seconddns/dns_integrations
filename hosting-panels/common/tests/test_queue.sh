@@ -20,6 +20,7 @@ export SECONDDNS_CONF="$TMP/seconddns.conf"
 export SECONDDNS_QUEUE_DB="$TMP/queue.db"
 export SECONDDNS_QUEUE_LOCK="$TMP/queue.lock"
 export SECONDDNS_LOG="$TMP/seconddns.log"
+export SECONDDNS_QUEUE_SOCK="$TMP/w.sock"
 
 cat > "$SECONDDNS_CONF" <<EOF
 [seconddns]
