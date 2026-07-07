@@ -21,18 +21,24 @@ Configuration (/etc/seconddns.conf):
   api_key = ...
 
   [queue]                # optional, defaults shown
-  poll_interval = 3      # seconds between queue checks when idle
+  poll_interval = 60     # fallback idle tick, seconds (wakeups are event-driven
+                         # via the unix socket, this only guards lost wakeups)
   http_timeout = 15      # seconds per API request
   backoff_min = 30       # first retry delay when the API is down
   backoff_max = 300      # retry delay ceiling
 
-Environment overrides (tests): SECONDDNS_CONF, SECONDDNS_QUEUE_DB, SECONDDNS_LOG.
+The queue CLI wakes the worker instantly after every enqueue by sending a
+datagram to the unix socket (/var/lib/seconddns/queued.sock).
+
+Environment overrides (tests): SECONDDNS_CONF, SECONDDNS_QUEUE_DB,
+SECONDDNS_LOG, SECONDDNS_QUEUE_SOCK.
 """
 
 import configparser
 import json
 import os
 import signal
+import socket
 import sqlite3
 import sys
 import time
@@ -41,6 +47,7 @@ import urllib.request
 
 CONF = os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf")
 QDB = os.environ.get("SECONDDNS_QUEUE_DB", "/var/lib/seconddns/queue.db")
+SOCK = os.environ.get("SECONDDNS_QUEUE_SOCK", "/var/lib/seconddns/queued.sock")
 LOG = os.environ.get("SECONDDNS_LOG", "/var/log/seconddns.log")
 UA = "SecondDNS-QueueWorker/1.0"
 
@@ -82,11 +89,43 @@ def load_config():
     return {
         "api_url": api_url.rstrip("/"),
         "api_key": api_key,
-        "poll_interval": cp.getint("queue", "poll_interval", fallback=3),
+        "poll_interval": cp.getint("queue", "poll_interval", fallback=60),
         "http_timeout": cp.getint("queue", "http_timeout", fallback=15),
         "backoff_min": cp.getint("queue", "backoff_min", fallback=30),
         "backoff_max": cp.getint("queue", "backoff_max", fallback=300),
     }
+
+
+def wake_socket():
+    """Bind the wakeup socket; enqueue-side sends a datagram after INSERT."""
+    os.makedirs(os.path.dirname(SOCK) or ".", exist_ok=True)
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
+    sk = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    # bind via a relative path: AF_UNIX paths are limited to ~104 bytes
+    cwd = os.getcwd()
+    try:
+        os.chdir(os.path.dirname(SOCK) or ".")
+        sk.bind(os.path.basename(SOCK))
+    finally:
+        os.chdir(cwd)
+    os.chmod(SOCK, 0o666)
+    return sk
+
+
+def wait_for_wakeup(sk, timeout):
+    """Sleep until a wakeup datagram arrives or the fallback tick fires."""
+    sk.settimeout(timeout)
+    try:
+        sk.recv(16)
+        # absorb any burst of wakeups queued while we were busy
+        sk.settimeout(0)
+        while True:
+            sk.recv(16)
+    except (socket.timeout, BlockingIOError, InterruptedError, OSError):
+        pass
 
 
 def db():
@@ -213,12 +252,15 @@ def main():
     if once:
         sys.exit(0 if drain(cfg, conn, once=True) else 1)
 
+    sk = wake_socket()
     log("[*] worker: started")
     while running:
         drain(cfg, conn, once=False)
-        deadline = time.time() + cfg["poll_interval"]
-        while running and time.time() < deadline:
-            time.sleep(0.5)
+        wait_for_wakeup(sk, cfg["poll_interval"])
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
     log("[*] worker: stopped")
 
 

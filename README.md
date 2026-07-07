@@ -54,8 +54,10 @@ Every panel integration ships with a local offline queue
 ([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
 Panel hooks enqueue zone operations into a SQLite database
 (`/var/lib/seconddns/queue.db`); the `seconddns-queued` systemd worker is the
-single delivery path — it watches the queue and delivers operations in strict
-FIFO order. If the SecondDNS API is unreachable (outage or maintenance), the
+single delivery path — after every enqueue the hook pokes the worker through a
+unix datagram socket (`/var/lib/seconddns/queued.sock`), so delivery starts
+instantly with no polling; a rare fallback tick (`poll_interval`, 60 s) only
+guards against lost wakeups. Operations are delivered in strict FIFO order. If the SecondDNS API is unreachable (outage or maintenance), the
 worker backs off exponentially and retries until everything is delivered.
 Nothing your customers do in the panel during a SecondDNS downtime is lost,
 and hooks never block on API timeouts (they only do a local INSERT).
@@ -64,7 +66,7 @@ Worker settings (optional `[queue]` section in `/etc/seconddns.conf`):
 
 ```ini
 [queue]
-poll_interval = 3      # seconds between queue checks when idle
+poll_interval = 60     # fallback idle tick (wakeups are socket-driven)
 http_timeout = 15      # seconds per API request
 backoff_min = 30       # first retry delay when the API is down
 backoff_max = 300      # retry delay ceiling
