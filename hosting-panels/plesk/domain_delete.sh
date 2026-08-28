@@ -33,7 +33,10 @@ fi
 # If neither is available, the domain name is sent as-is (API will handle it)
 
 QUEUE="/usr/local/bin/seconddns-queue"
-"$QUEUE" enqueue delete "$ZONE_NAME"
-log "[>] Zone $ZONE_NAME removal queued for SecondDNS"
+if "$QUEUE" enqueue delete "$ZONE_NAME"; then
+    log "[>] Zone $ZONE_NAME removal queued for SecondDNS"
+else
+    log "[!] Zone $ZONE_NAME removal NOT queued (seconddns-queue failed)"
+fi
 
 exit 0

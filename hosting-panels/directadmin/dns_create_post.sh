@@ -29,7 +29,10 @@ esac
 log "Zone created: $domain (caller=$caller, user=$username)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
-"$QUEUE" enqueue create "$domain" "$MASTER_IP"
-log "[>] Zone $domain queued for SecondDNS"
+if "$QUEUE" enqueue create "$domain" "$MASTER_IP"; then
+    log "[>] Zone $domain queued for SecondDNS"
+else
+    log "[!] Zone $domain NOT queued (seconddns-queue failed)"
+fi
 
 exit 0

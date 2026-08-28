@@ -22,7 +22,10 @@ API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
 log "Zone deleted: $domain (user=$USERNAME)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
-"$QUEUE" enqueue delete "$domain"
-log "[>] Zone $domain removal queued for SecondDNS"
+if "$QUEUE" enqueue delete "$domain"; then
+    log "[>] Zone $domain removal queued for SecondDNS"
+else
+    log "[!] Zone $domain removal NOT queued (seconddns-queue failed)"
+fi
 
 exit 0

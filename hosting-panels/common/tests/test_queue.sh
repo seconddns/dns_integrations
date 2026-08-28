@@ -124,8 +124,8 @@ assert_eq "$(failed)" 0 "no failed rows"
 
 echo "== 5. hard error: marked failed, queue continues"
 echo badreq > "$TMP/mode"
-"$QUEUE" enqueue create "bad domain" 192.0.2.10
-echo ok > "$TMP/mode.next" # placeholder to show intent
+# well-formed name; the 400 comes from the API, not from input validation
+"$QUEUE" enqueue create rejected.example.com 192.0.2.10
 "$QUEUE" flush
 assert_eq "$(failed)" 1 "400 marked failed"
 assert_eq "$(pending)" 0 "failed op does not block the queue"
@@ -163,6 +163,25 @@ echo ok > "$TMP/mode"
 for i in $(seq 1 15); do [ "$(pending)" = 0 ] && break; sleep 1; done
 assert_eq "$(pending)" 0 "daemon drained the queue after API recovery"
 kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+
+echo "== 9. input validation and normalization"
+before=$(pending)
+"$QUEUE" enqueue create "Mixed.CASE.example.COM." 192.0.2.10
+assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
+    "mixed.case.example.com" "domain lowercased and root dot stripped"
+
+for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" ""; do
+    rc=0; "$QUEUE" enqueue create "$bad" 192.0.2.10 || rc=$?
+    assert_eq "$rc" 2 "rejected invalid domain '$bad'"
+done
+
+rc=0; "$QUEUE" enqueue create valid.example.com "999.1.1.1" || rc=$?
+assert_eq "$rc" 2 "rejected invalid master_ip"
+rc=0; "$QUEUE" enqueue purge valid.example.com 192.0.2.10 || rc=$?
+assert_eq "$rc" 2 "rejected unknown op"
+assert_eq "$(( $(pending) - before ))" 1 "only the valid op reached the queue"
+echo ok > "$TMP/mode"
+"$QUEUE" flush >/dev/null
 
 echo
 echo "passed: $PASS, failed: $FAIL"
