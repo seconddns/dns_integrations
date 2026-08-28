@@ -11,7 +11,7 @@ Monitors DNS zone health via the SecondDNS API. Returns standard Nagios exit cod
 
 ```bash
 curl -o /usr/lib/nagios/plugins/check_seconddns.sh \
-  https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/nagios_plugins/check_seconddns.sh
+  https://raw.githubusercontent.com/seconddns/dns_integrations/main/nagios_plugins/check_seconddns.sh
 
 chmod +x /usr/lib/nagios/plugins/check_seconddns.sh
 ```
