@@ -35,13 +35,16 @@ except Exception:
 DOMAIN_LIB="/usr/local/bin/seconddns-domain"
 [ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
 SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NAME="$ZONE_NAME"
 if ! canonical_domain "$ZONE_NAME"; then
     log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (cpanel hook)"
     exit 0
 fi
 ZONE_NAME="$DOMAIN"
+# keep what the panel actually handed over, for later diagnosis
+RAW_NOTE=""; [ "$RAW_NAME" != "$ZONE_NAME" ] && RAW_NOTE=" (received as '$RAW_NAME')"
 
-log "Zone created: $ZONE_NAME (cpanel hook)"
+log "Zone created: $ZONE_NAME (cpanel hook)$RAW_NOTE"
 
 QUEUE="/usr/local/bin/seconddns-queue"
 if "$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"; then
