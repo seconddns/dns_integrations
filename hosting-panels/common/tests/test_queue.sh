@@ -432,6 +432,11 @@ assert_eq "$(pending)" 0 "refusal queues nothing"
 "$REC" --from-file "$TMP/wrong.txt" --remove-stale --apply --force-bulk-delete >/dev/null
 assert_eq "$(pending)" 2 "--force-bulk-delete overrides"
 sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+# piped into a reader that closes without reading: no traceback on stderr
+err=$( { "$REC" --from-file "$TMP/domains.txt" | true; } 2>&1 )
+[[ "$err" == *"BrokenPipe"* ]] && fail "BrokenPipeError when the reader closes the pipe" || ok "no traceback when the reader closes the pipe"
+err=$( { "$MIG" --from-file "$TMP/domains.txt" | true; } 2>&1 )
+[[ "$err" == *"BrokenPipe"* ]] && fail "migrate-master: BrokenPipeError" || ok "migrate-master: no traceback either"
 unset SECONDDNS_QUEUE_BIN SECONDDNS_DOMAIN_BIN
 
 echo
