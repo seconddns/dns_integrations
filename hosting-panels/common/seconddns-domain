@@ -1,0 +1,55 @@
+#!/bin/bash
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+# Canonical zone name for every panel hook: lowercase, IDNA2008 Punycode, LDH.
+#
+# Sourced by bash hooks (SECONDDNS_DOMAIN_LIB=1) or run as a CLI:
+#   seconddns-domain <name>      prints the canonical name, exit 0
+#                                prints the reason on stderr, exit 1 on refusal
+#
+# Requires idn2 (IDNA2008); no fallback, a missing binary is a refusal.
+
+# Sets DOMAIN on success, DOMAIN_ERROR on failure. No subshell, so callers
+# see both variables.
+canonical_domain() {
+    local d ascii label
+    DOMAIN="" DOMAIN_ERROR=""
+    d=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+
+    case "$d" in
+        "") DOMAIN_ERROR="empty name"; return 1 ;;
+        *[!!-~]*)
+            command -v idn2 >/dev/null 2>&1 || { DOMAIN_ERROR="idn2 not installed, cannot convert non-ASCII name"; return 1; }
+            ascii=$(idn2 --quiet -- "$d" 2>&1) || { DOMAIN_ERROR="IDNA2008 rejected: ${ascii#idn2: }"; return 1; }
+            d="$ascii"
+            ;;
+    esac
+
+    [ "${#d}" -le 253 ] || { DOMAIN_ERROR="longer than 253 characters"; return 1; }
+    case "$d" in
+        *.*) ;;
+        *) DOMAIN_ERROR="no dot, not a zone name"; return 1 ;;
+    esac
+    case "$d" in .*|*.|*..*) DOMAIN_ERROR="empty label"; return 1 ;; esac
+
+    local IFS='.'
+    for label in $d; do
+        [ "${#label}" -le 63 ] || { DOMAIN_ERROR="label '$label' longer than 63 characters"; return 1; }
+        case "$label" in
+            -*|*-) DOMAIN_ERROR="label '$label' starts or ends with a hyphen"; return 1 ;;
+            *[!a-z0-9-]*) DOMAIN_ERROR="label '$label' has characters outside a-z 0-9 -"; return 1 ;;
+        esac
+    done
+    DOMAIN="$d"
+}
+
+[ -n "${SECONDDNS_DOMAIN_LIB:-}" ] && return 0
+
+[ $# -eq 1 ] || { echo "usage: $0 <name>" >&2; exit 2; }
+if canonical_domain "$1"; then
+    printf '%s\n' "$DOMAIN"
+else
+    echo "$DOMAIN_ERROR" >&2
+    exit 1
+fi

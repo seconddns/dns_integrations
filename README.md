@@ -52,6 +52,10 @@ See the README in each directory for options, AXFR configuration, and troublesho
 
 Every panel integration ships with a local offline queue
 ([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
+Every hook first passes the zone name through
+[`seconddns-domain`](hosting-panels/common/seconddns-domain) (lowercase, IDNA2008
+Punycode via `idn2`, LDH check); a name that fails is logged with the reason and
+never enqueued.
 Panel hooks enqueue zone operations into a SQLite database
 (`/var/lib/seconddns/queue.db`); the `seconddns-queued` systemd worker is the
 single delivery path — after every enqueue the hook pokes the worker through a

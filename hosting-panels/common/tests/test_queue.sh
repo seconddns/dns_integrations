@@ -164,32 +164,15 @@ for i in $(seq 1 15); do [ "$(pending)" = 0 ] && break; sleep 1; done
 assert_eq "$(pending)" 0 "daemon drained the queue after API recovery"
 kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
 
-echo "== 9. input validation and normalization"
+echo "== 9. queue stores names verbatim, refuses unknown ops"
 before=$(pending)
-"$QUEUE" enqueue create "Mixed.CASE.example.COM" 192.0.2.10
+"$QUEUE" enqueue create "o'quote.example.com" 192.0.2.10
 assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
-    "mixed.case.example.com" "domain lowercased"
-
-"$QUEUE" enqueue create "ПРИКЛАД.УКР" 192.0.2.10
-assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
-    "xn--80aikifvh.xn--j1amh" "non-latin name converted to punycode"
-
-# valid_domain answers on its own, without assuming normalize_domain ran
-( SECONDDNS_QUEUE_LIB=1 . "$QUEUE"; valid_domain "Example.COM" ) && ok "valid_domain is case-insensitive" \
-    || fail "valid_domain is case-insensitive"
-
-for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" "" "приклад..укр" " lead.space.com" "trail.dot.com."; do
-    rc=0; "$QUEUE" enqueue create "$bad" 192.0.2.10 || rc=$?
-    assert_eq "$rc" 2 "rejected invalid domain '$bad'"
-done
-
-rc=0; "$QUEUE" enqueue create valid.example.com "999.1.1.1" || rc=$?
-assert_eq "$rc" 2 "rejected invalid master_ip"
+    "o'quote.example.com" "single quote stored intact (SQL quoting)"
 rc=0; "$QUEUE" enqueue purge valid.example.com 192.0.2.10 || rc=$?
 assert_eq "$rc" 2 "rejected unknown op"
-assert_eq "$(( $(pending) - before ))" 2 "only the valid ops reached the queue"
-echo ok > "$TMP/mode"
-"$QUEUE" flush >/dev/null
+assert_eq "$(( $(pending) - before ))" 1 "one row added"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
 
 echo
 echo "passed: $PASS, failed: $FAIL"

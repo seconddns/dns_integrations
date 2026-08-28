@@ -30,7 +30,14 @@ except Exception:
 
 [ -z "$ZONE_NAME" ] && exit 0
 
-# cPanel stores all domains in Punycode internally — no IDN conversion needed
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+if ! canonical_domain "$ZONE_NAME"; then
+    log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (cpanel hook)"
+    exit 0
+fi
+ZONE_NAME="$DOMAIN"
 
 log "Zone deleted: $ZONE_NAME (cpanel hook)"
 

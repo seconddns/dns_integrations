@@ -108,6 +108,18 @@ def api_request(config, method, path, data=None):
 
 
 QUEUE_BIN = "/usr/local/bin/seconddns-queue"
+DOMAIN_BIN = "/usr/local/bin/seconddns-domain"
+
+
+def canonical_domain(domain):
+    """Lowercase + Punycode + LDH via the shared tool. Returns (name, None) or (None, reason)."""
+    try:
+        r = subprocess.run([DOMAIN_BIN, domain], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        return None, str(e)
+    if r.returncode != 0:
+        return None, r.stderr.strip() or "refused"
+    return r.stdout.strip(), None
 
 
 def queue_op(op, domain, master_ip=""):
@@ -133,7 +145,10 @@ def list_zones(config):
 
 
 def add_zone(config, domain):
-    domain = domain.lower().rstrip(".")
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
+        return False
     if not config or not config.get("master_ip"):
         return False
     logger.info("[+] Adding zone: %s (master: %s)", domain, config["master_ip"])
@@ -148,7 +163,10 @@ def find_zone_by_name(config, domain):
 
 
 def remove_zone(config, domain):
-    domain = domain.lower().rstrip(".")
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
+        return False
     logger.info("[-] Removing zone: %s", domain)
     return queue_op("delete", domain)
 

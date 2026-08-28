@@ -68,64 +68,6 @@ fi
 PLESK_VER=$(plesk version 2>/dev/null | head -1 || echo "unknown")
 echo "[+] Plesk detected: $PLESK_VER"
 
-# Install IDN utilities (for internationalized domain name support)
-echo "[*] Checking IDN utilities..."
-if ! command -v idn2 &>/dev/null && ! command -v idn &>/dev/null; then
-    echo "[*] Installing idn2 for IDN domain support..."
-    IDN_INSTALLED=0
-
-    # Detect OS and use appropriate package manager
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="$ID"
-    elif [ -f /etc/lsb-release ]; then
-        . /etc/lsb-release
-        OS_ID="${DISTRIB_ID,,}"
-    fi
-
-    case "$OS_ID" in
-        ubuntu|debian)
-            apt-get update -qq 2>/dev/null
-            apt-get install -y -qq idn2 2>/dev/null && IDN_INSTALLED=1
-            ;;
-        fedora|rhel|centos|almalinux|rocky)
-            if command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-        alpine)
-            apk add --no-cache libidn2-tools 2>/dev/null && IDN_INSTALLED=1
-            ;;
-        *)
-            # Fallback: try apt-get, then dnf, then yum
-            if command -v apt-get &>/dev/null; then
-                apt-get update -qq 2>/dev/null
-                apt-get install -y -qq idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-    esac
-
-    if [ "$IDN_INSTALLED" -eq 1 ] && (command -v idn2 &>/dev/null || command -v idn &>/dev/null); then
-        echo "[+] IDN utilities installed successfully"
-    else
-        echo "[!] Warning: Could not install IDN utilities"
-        echo "    IDN domains will still work but require idn2/idn on the system"
-        echo "    Install manually:"
-        echo "      Ubuntu/Debian: apt-get install idn2"
-        echo "      AlmaLinux/Rocky: dnf install idn2"
-        echo "      RHEL/CentOS: yum install idn2"
-        echo "      Alpine: apk add libidn2-tools"
-    fi
-else
-    echo "[+] IDN utilities already installed"
-fi
-
 # Verify API key
 echo "[*] Verifying API key..."
 curl -sf --max-time 10 \
@@ -236,10 +178,12 @@ done
 echo ""
 echo "--- Installing offline operation queue ---"
 COMMON_URL="${REPO_URL%/*}/common"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-domain "$COMMON_URL/seconddns-domain?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-queue?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
-chmod +x /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 if ! command -v sqlite3 &>/dev/null; then
     echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
