@@ -410,6 +410,28 @@ sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
 "$REC" --from-file "$TMP/domains.txt" --remove-stale --apply >/dev/null
 assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT op||' '||domain||' '||IFNULL(master_ip,'') FROM ops;")" "delete gone.example.com 192.0.2.10" "--remove-stale --apply queues only the own-master stale"
 sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+# panel cannot be read -> refusal, nothing queued
+rc=0; SECONDDNS_PANEL_ZONES_CMD="false" "$REC" --remove-stale --apply >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 1 "panel command failing -> exit 1"
+assert_eq "$(pending)" 0 "and nothing queued"
+rc=0; SECONDDNS_PANEL_ZONES_CMD="true" "$REC" --remove-stale --apply >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 1 "panel reporting no zones -> exit 1"
+: > "$TMP/empty.txt"
+rc=0; "$REC" --from-file "$TMP/empty.txt" --remove-stale --apply >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 1 "empty --from-file -> exit 1"
+assert_eq "$(pending)" 0 "still nothing queued"
+# panel zone list is what counts: a zone list from the panel, not sites
+out=$(SECONDDNS_PANEL_ZONES_CMD="printf 'mine.example.com\nold.example.com\n'" "$REC")
+[[ "$out" == *"ok: 1   missing: 0   stale: 2"* ]] && ok "panel zone list drives the report" || fail "panel cmd report: $out"
+# bulk delete threshold: a list without any of my zones would drop all of them
+printf 'old.example.com\n' > "$TMP/wrong.txt"
+rc=0; out=$("$REC" --from-file "$TMP/wrong.txt" --remove-stale --apply 2>&1) || rc=$?
+assert_eq "$rc" 1 "deleting all own zones is refused"
+[[ "$out" == *"would delete 2 of 2"* ]] && ok "refusal names the numbers" || fail "refusal text: $out"
+assert_eq "$(pending)" 0 "refusal queues nothing"
+"$REC" --from-file "$TMP/wrong.txt" --remove-stale --apply --force-bulk-delete >/dev/null
+assert_eq "$(pending)" 2 "--force-bulk-delete overrides"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
 unset SECONDDNS_QUEUE_BIN SECONDDNS_DOMAIN_BIN
 
 echo
