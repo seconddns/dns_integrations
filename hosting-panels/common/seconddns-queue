@@ -12,6 +12,8 @@
 #   seconddns-queue enqueue <create|delete> <domain> [master_ip]
 #   seconddns-queue flush             # manual one-shot drain (diagnostics)
 #   seconddns-queue status [--json]
+#   seconddns-queue retry <id|--all>  # failed -> pending
+#   seconddns-queue drop  <id|--all>  # delete failed rows
 #
 # Exit codes for status: 0 = empty/healthy, 1 = pending backlog, 2 = failed ops
 #
@@ -24,6 +26,7 @@ set -u
 QDB="${SECONDDNS_QUEUE_DB:-/var/lib/seconddns/queue.db}"
 QSOCK="${SECONDDNS_QUEUE_SOCK:-/var/lib/seconddns/queued.sock}"
 LOG="${SECONDDNS_LOG:-/var/log/seconddns.log}"
+CONF="${SECONDDNS_CONF:-/etc/seconddns.conf}"
 WORKER="${SECONDDNS_QUEUED_BIN:-/usr/local/bin/seconddns-queued}"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
@@ -66,26 +69,64 @@ cmd_enqueue() {
         return 1
     }
     log "[>] queue: enqueued $op $domain"
-    # wake the delivery worker instantly (best-effort)
+    wake_worker
+}
+
+# Best-effort: on failure delivery waits for the worker's poll tick.
+wake_worker() {
     python3 -c '
 import socket, os, sys
 sock = sys.argv[1]
 os.chdir(os.path.dirname(sock) or ".")  # AF_UNIX ~104-byte path limit
 s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 s.sendto(b"1", os.path.basename(sock))
-' "$QSOCK" 2>/dev/null || true
+' "$QSOCK" 2>/dev/null && return 0
+    local tick
+    tick=$(sed -n 's/^[[:space:]]*poll_interval[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$CONF" 2>/dev/null | head -1)
+    log "[~] queue: wakeup failed, worker will pick it up within ${tick:-60}s"
+}
+
+# failed -> pending; <id> or --all
+cmd_retry() {
+    init_db
+    local n
+    case "${1:-}" in
+        --all) n=$(sq "UPDATE ops SET status='pending', last_error=NULL WHERE status='failed'; SELECT changes();") ;;
+        ''|*[!0-9]*) echo "usage: $0 retry <id|--all>" >&2; return 1 ;;
+        *) n=$(sq "UPDATE ops SET status='pending', last_error=NULL WHERE status='failed' AND id=$1; SELECT changes();") ;;
+    esac
+    echo "retried $n op(s)"
+    [ "$n" -gt 0 ] && { log "[>] queue: $n failed op(s) requeued"; wake_worker; }
+    return 0
+}
+
+# delete failed rows; <id> or --all
+cmd_drop() {
+    init_db
+    local n
+    case "${1:-}" in
+        --all) n=$(sq "DELETE FROM ops WHERE status='failed'; SELECT changes();") ;;
+        ''|*[!0-9]*) echo "usage: $0 drop <id|--all>" >&2; return 1 ;;
+        *) n=$(sq "DELETE FROM ops WHERE status='failed' AND id=$1; SELECT changes();") ;;
+    esac
+    echo "dropped $n op(s)"
+    [ "$n" -gt 0 ] && log "[-] queue: $n failed op(s) dropped"
+    return 0
 }
 
 cmd_status() {
     init_db
-    local pending failed oldest_age
+    local pending failed oldest_age last_error
     pending=$(sq "SELECT COUNT(*) FROM ops WHERE status='pending';")
     failed=$(sq "SELECT COUNT(*) FROM ops WHERE status='failed';")
     oldest_age=$(sq "SELECT IFNULL(CAST(strftime('%s','now') - strftime('%s', MIN(ts)) AS INTEGER), 0) FROM ops WHERE status='pending';")
+    # the head of the FIFO is what blocks everything behind it
+    last_error=$(sq "SELECT IFNULL(last_error,'') FROM ops WHERE status='pending' ORDER BY id LIMIT 1;")
     if [ "${1:-}" = "--json" ]; then
-        echo "{\"pending\": $pending, \"failed\": $failed, \"oldest_age_seconds\": $oldest_age}"
+        python3 -c 'import json,sys; print(json.dumps({"pending": int(sys.argv[1]), "failed": int(sys.argv[2]), "oldest_age_seconds": int(sys.argv[3]), "last_error": sys.argv[4]}))' \
+            "$pending" "$failed" "$oldest_age" "$last_error"
     else
-        echo "pending=$pending failed=$failed oldest_age_seconds=$oldest_age"
+        echo "pending=$pending failed=$failed oldest_age_seconds=$oldest_age last_error=$last_error"
     fi
     [ "$failed" -gt 0 ] && exit 2
     [ "$pending" -gt 0 ] && exit 1
@@ -99,8 +140,10 @@ case "${1:-}" in
     ;;
   flush)  exec "$WORKER" --once ;;
   status) cmd_status "${2:-}" ;;
+  retry)  cmd_retry "${2:-}" ;;
+  drop)   cmd_drop "${2:-}" ;;
   *)
-    echo "usage: $0 enqueue|flush|status" >&2
+    echo "usage: $0 enqueue|flush|status|retry|drop" >&2
     exit 1
     ;;
 esac

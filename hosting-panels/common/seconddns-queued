@@ -35,6 +35,7 @@ SECONDDNS_LOG, SECONDDNS_QUEUE_SOCK.
 """
 
 import configparser
+import fcntl
 import json
 import os
 import signal
@@ -48,6 +49,7 @@ import urllib.request
 CONF = os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf")
 QDB = os.environ.get("SECONDDNS_QUEUE_DB", "/var/lib/seconddns/queue.db")
 SOCK = os.environ.get("SECONDDNS_QUEUE_SOCK", "/var/lib/seconddns/queued.sock")
+LOCK = os.environ.get("SECONDDNS_QUEUE_LOCK", QDB + ".lock")
 LOG = os.environ.get("SECONDDNS_LOG", "/var/log/seconddns.log")
 UA = "SecondDNS-QueueWorker/1.0"
 
@@ -111,7 +113,7 @@ def wake_socket():
         sk.bind(os.path.basename(SOCK))
     finally:
         os.chdir(cwd)
-    os.chmod(SOCK, 0o666)
+    os.chmod(SOCK, 0o660)
     return sk
 
 
@@ -136,8 +138,29 @@ def db():
     return conn
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 30x is an answer from something in front of the API (maintenance
+    switch, proxy); surface it as-is instead of fetching the target."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def queue_lock(block):
+    """Exclusive lock shared by every drainer. Returns fd, or None if busy."""
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    return fd
+
+
 def api(cfg, method, path, payload=None):
-    """Returns (status_code, body_dict). status 0 = network-level failure."""
+    """Returns (status_code, body_dict). status 0 = no usable answer from the API."""
     url = cfg["api_url"] + path
     body = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=body, method=method, headers={
@@ -146,9 +169,12 @@ def api(cfg, method, path, payload=None):
         "User-Agent": UA,
     })
     try:
-        with urllib.request.urlopen(req, timeout=cfg["http_timeout"]) as resp:
+        with OPENER.open(req, timeout=cfg["http_timeout"]) as resp:
             raw = resp.read()
-            data = json.loads(raw) if raw else {}
+            try:
+                data = json.loads(raw) if raw else {}
+            except ValueError:
+                return 0, {"error": f"HTTP {resp.status} with non-JSON body (proxy or maintenance page?)"}
             return resp.status, data
     except urllib.error.HTTPError as e:
         try:
@@ -157,43 +183,51 @@ def api(cfg, method, path, payload=None):
             data = {}
         return e.code, data
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return 0, {"error": str(e)}
+        return 0, {"error": f"network: {e}"}
+
+
+def detail(code, data):
+    if code == 0:
+        return data.get("error", "no response")
+    if code in (401, 403):
+        return f"HTTP {code} auth rejected"
+    return f"HTTP {code}"
 
 
 def send_op(cfg, op, domain, master_ip):
-    """Deliver one operation. Returns DONE / RETRY / FAILED (+ last status)."""
+    """Deliver one operation. Returns (DONE / RETRY / FAILED, detail string)."""
     if op == "create":
-        code, _ = api(cfg, "POST", "/api/zones",
-                      {"name": domain, "masterIp": master_ip})
+        code, data = api(cfg, "POST", "/api/zones",
+                         {"name": domain, "masterIp": master_ip})
         if code in (200, 201):
-            return DONE, code
+            return DONE, detail(code, data)
         if code == 409:
             log(f"[~] worker: zone {domain} already exists (treated as success)")
-            return DONE, code
+            return DONE, detail(code, data)
         if code in (400, 422):
-            return FAILED, code
-        return RETRY, code
+            return FAILED, detail(code, data)
+        return RETRY, detail(code, data)
 
     if op == "delete":
         code, zone = api(cfg, "GET", f"/api/zones/by-name/{domain}")
         if code == 404:
             log(f"[~] worker: zone {domain} already absent (treated as success)")
-            return DONE, code
+            return DONE, detail(code, zone)
         if code in (400, 422):
-            return FAILED, code
+            return FAILED, detail(code, zone)
         if code == 200 and not zone.get("id"):
             log(f"[!] worker: zone {domain} lookup returned 200 without id")
-            return FAILED, code
+            return FAILED, "HTTP 200 without id"
         if code != 200:
-            return RETRY, code
-        code, _ = api(cfg, "DELETE", f"/api/zones/{zone['id']}")
+            return RETRY, detail(code, zone)
+        code, data = api(cfg, "DELETE", f"/api/zones/{zone['id']}")
         if code in (200, 204, 404):
-            return DONE, code
+            return DONE, detail(code, data)
         if code in (400, 422):
-            return FAILED, code
-        return RETRY, code
+            return FAILED, detail(code, data)
+        return RETRY, detail(code, data)
 
-    return FAILED, 0
+    return FAILED, f"unknown op {op}"
 
 
 def drain(cfg, conn, once):
@@ -211,7 +245,7 @@ def drain(cfg, conn, once):
             return True
         rid, op, domain, master_ip = row
 
-        result, code = send_op(cfg, op, domain, master_ip)
+        result, why = send_op(cfg, op, domain, master_ip)
         if result == DONE:
             conn.execute("DELETE FROM ops WHERE id=?", (rid,))
             conn.commit()
@@ -220,17 +254,18 @@ def drain(cfg, conn, once):
         elif result == FAILED:
             conn.execute(
                 "UPDATE ops SET status='failed', attempts=attempts+1,"
-                " last_error=? WHERE id=?", (f"HTTP {code}", rid))
+                " last_error=? WHERE id=?", (why, rid))
             conn.commit()
-            log(f"[!] worker: {op} {domain} permanently failed (HTTP {code})")
+            log(f"[!] worker: {op} {domain} permanently failed ({why})")
         else:  # RETRY — API unavailable, keep FIFO order and wait
             conn.execute(
                 "UPDATE ops SET attempts=attempts+1, last_error=? WHERE id=?",
-                (f"HTTP {code}", rid))
+                (why, rid))
             conn.commit()
             pending = conn.execute(
                 "SELECT COUNT(*) FROM ops WHERE status='pending'").fetchone()[0]
-            log(f"[~] worker: API unavailable (HTTP {code}),"
+            what = "API key rejected" if "auth rejected" in why else "API unavailable"
+            log(f"[~] worker: {what} ({why}),"
                 f" {pending} op(s) waiting, retry in {backoff}s")
             if once:
                 return False
@@ -253,12 +288,21 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     if once:
+        fd = queue_lock(block=False)
+        if fd is None:
+            log("[~] worker: another drainer holds the queue lock, nothing to do")
+            print("queue is being drained by another process")
+            sys.exit(0)
         sys.exit(0 if drain(cfg, conn, once=True) else 1)
 
     sk = wake_socket()
     log("[*] worker: started")
     while running:
-        drain(cfg, conn, once=False)
+        fd = queue_lock(block=True)
+        try:
+            drain(cfg, conn, once=False)
+        finally:
+            os.close(fd)
         wait_for_wakeup(sk, cfg["poll_interval"])
     try:
         os.unlink(SOCK)
