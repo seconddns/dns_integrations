@@ -1,0 +1,50 @@
+#!/bin/bash
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+# Zone ownership check before a delete: is the zone in SecondDNS mastered by
+# this server? Protects a migrated zone from being deleted by the old server.
+#
+# Sourced by bash hooks (SECONDDNS_OWNER_LIB=1) or run as a CLI:
+#   seconddns-owner <domain> [master_ip]
+# Exit: 0 = ours or absent (go ahead), 1 = mastered by another server (prints
+# its IP), 2 = could not check (API unreachable), 3 = check disabled in config.
+#
+# Config (/etc/seconddns.conf): delete_check_master_ip = true|false, default true.
+
+CONF="${SECONDDNS_CONF:-/etc/seconddns.conf}"
+
+conf_get() {
+    sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" 2>/dev/null | head -1 | tr -d '[:space:]'
+}
+
+# Sets OWNER_IP when the zone exists in SecondDNS.
+owner_check() {
+    local domain="$1" my="${2:-}" api_url api_key enabled body code
+    OWNER_IP=""
+    enabled=$(conf_get delete_check_master_ip | tr '[:upper:]' '[:lower:]')
+    case "$enabled" in false|0|no|off) return 3 ;; esac
+    api_url=$(conf_get api_url); api_url="${api_url%/}"
+    api_key=$(conf_get api_key)
+    [ -n "$my" ] || my=$(conf_get master_ip)
+    [ -n "$api_url" ] && [ -n "$api_key" ] && [ -n "$my" ] || return 2
+    body=$(curl -s --max-time 10 -w '\n%{http_code}' -H "X-API-Key: $api_key" \
+        "$api_url/api/zones/by-name/$domain" 2>/dev/null) || return 2
+    code="${body##*$'\n'}"; body="${body%$'\n'*}"
+    case "$code" in
+        404) return 0 ;;
+        200)
+            OWNER_IP=$(printf '%s' "$body" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("masterIp") or "")' 2>/dev/null) || return 2
+            [ -n "$OWNER_IP" ] || return 2
+            [ "$OWNER_IP" = "$my" ] && return 0
+            return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
+[ -n "${SECONDDNS_OWNER_LIB:-}" ] && return 0
+
+[ $# -ge 1 ] || { echo "usage: $0 <domain> [master_ip]" >&2; exit 2; }
+owner_check "$1" "${2:-}"; rc=$?
+[ $rc -eq 1 ] && echo "$OWNER_IP"
+exit $rc

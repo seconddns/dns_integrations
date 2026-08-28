@@ -168,6 +168,7 @@ cat > "$CONFIG_FILE" << EOF
 api_url = $API_URL
 api_key = $API_KEY
 master_ip = $MASTER_IP
+delete_check_master_ip = true
 EOF
 chown root:root "$CONFIG_FILE"
 chmod 644 "$CONFIG_FILE"
@@ -226,10 +227,12 @@ with open(p, 'w') as f: f.write(c)
 # --- Offline operation queue ---
 COMMON_SRC="$WORK_DIR/dns_integrations/hosting-panels/common"
 cp "$COMMON_SRC/seconddns-domain" /usr/local/bin/seconddns-domain
+cp "$COMMON_SRC/seconddns-owner" /usr/local/bin/seconddns-owner
+cp "$COMMON_SRC/seconddns-migrate-master" /usr/local/bin/seconddns-migrate-master
 cp "$COMMON_SRC/seconddns-queue" /usr/local/bin/seconddns-queue
 cp "$COMMON_SRC/seconddns-queued" /usr/local/bin/seconddns-queued
 cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.service
-chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 if ! command -v sqlite3 &>/dev/null; then

@@ -58,3 +58,7 @@ tail -f /var/log/seconddns.log
 ```bash
 grep -E "^master=|^allow-axfr-ips=|^also-notify=" /etc/pdns/pdns.conf
 ```
+
+## Moving to another server
+
+See [MIGRATION.md](../../MIGRATION.md): deletes check the zone's master first, and `seconddns-migrate-master` re-points moved zones to the new server.
