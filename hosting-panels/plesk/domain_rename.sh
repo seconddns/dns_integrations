@@ -30,15 +30,18 @@ NEW_ZONE="${NEW_DOMAIN_ALIAS_NAME:-$NEW_DOMAIN_NAME}"
 DOMAIN_LIB="/usr/local/bin/seconddns-domain"
 [ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
 SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NOTE=""
 for var in OLD_ZONE NEW_ZONE; do
+    raw="${!var}"
     if ! canonical_domain "${!var}"; then
         log "[!] Zone '${!var}' refused: $DOMAIN_ERROR (plesk event handler)"
         exit 0
     fi
     printf -v "$var" '%s' "$DOMAIN"
+    [ "$raw" != "$DOMAIN" ] && RAW_NOTE="$RAW_NOTE ($var received as '$raw')"
 done
 
-log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
+log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)$RAW_NOTE"
 
 QUEUE="/usr/local/bin/seconddns-queue"
 rc=0
