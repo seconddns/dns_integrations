@@ -73,7 +73,7 @@ Worker settings (optional `[queue]` section in `/etc/seconddns.conf`):
 poll_interval = 60     # fallback idle tick (wakeups are socket-driven)
 http_timeout = 15      # seconds per API request
 backoff_min = 30       # first retry delay when the API is down
-backoff_max = 300      # retry delay ceiling
+backoff_max = 28800    # retry delay ceiling (8 h)
 ```
 
 Replay semantics:
