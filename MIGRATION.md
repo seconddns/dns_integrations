@@ -49,6 +49,19 @@ and goes through the same name canonicalisation as the hooks, so IDN names
 match their Punycode zones. Zones not hosted on this panel are left alone
 unless you pass `--all`.
 
+**`seconddns-reconcile` shows the difference.** Panel vs SecondDNS, four
+lists: `ok`, `missing` (on the panel only), `stale` (in SecondDNS only, with
+each zone's master), `mismatch` (in both, mastered elsewhere — that is
+`seconddns-migrate-master`'s job). `--add-missing` and `--remove-stale`
+show what would be queued; add `--apply` to queue it. A stale zone mastered
+by another server is never deleted from here.
+
+```bash
+seconddns-reconcile                                   # report only
+seconddns-reconcile --add-missing --remove-stale      # what would change
+seconddns-reconcile --add-missing --remove-stale --apply
+```
+
 ## Order of operations
 
 1. Install the integration on the new server (same API key as the old one).
@@ -65,7 +78,9 @@ unless you pass `--all`.
    that ships `seconddns-owner`), then delete the domains there. Each delete
    is skipped with a log line because the zone is now mastered by the new
    server.
-5. Uninstall the integration on the old server once it is empty.
+5. `seconddns-reconcile` on the new server: everything should be `ok`;
+   `--add-missing --apply` picks up anything the migration left behind.
+6. Uninstall the integration on the old server once it is empty.
 
 Accounts that stay on the old server for a while are not touched by
 `seconddns-migrate-master` unless you pass `--all`; their zones keep the old
