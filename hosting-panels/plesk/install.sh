@@ -389,7 +389,7 @@ fi
 
 # Initial sync
 echo ""
-if confirm "Sync existing domains to secondary DNS now?"; then
+if confirm "Queue existing domains for delivery to secondary DNS now?"; then
     echo "[*] Syncing domains..."
     added=0; skipped=0; failures=""
     while IFS= read -r sdomain; do
@@ -400,22 +400,17 @@ if confirm "Sync existing domains to secondary DNS now?"; then
             skipped=$((skipped+1)); failures="$failures\n    $raw: $sdomain"
             continue
         fi
-        # explicit status: with set -e a failing 'curl -f' would abort the whole installer
-        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-            -X POST \
-            -H "X-API-Key: $API_KEY" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: SecondDNS-Plesk/1.0" \
-            -d "{\"name\":\"$sdomain\",\"masterIp\":\"$MASTER_IP\"}" \
-            "$API_URL/api/zones" 2>/dev/null) || code=000
-        case "$code" in
-            200|201) echo "    [+] $sdomain"; added=$((added+1)) ;;
-            409)     echo "    [=] $sdomain (already exists)"; added=$((added+1)) ;;
-            *)       echo "    [!] $sdomain (HTTP $code)"; skipped=$((skipped+1)); failures="$failures\n    $sdomain: HTTP $code" ;;
-        esac
+        # hand over to the queue: the worker delivers with retry/backoff, FIFO,
+        # and 409-as-success, so an install during an API outage drains itself
+        if /usr/local/bin/seconddns-queue enqueue create "$sdomain" "$MASTER_IP"; then
+            echo "    [>] $sdomain"; added=$((added+1))
+        else
+            echo "    [!] $sdomain (enqueue failed, see $LOG_FILE)"; skipped=$((skipped+1)); failures="$failures\n    $sdomain: enqueue failed"
+        fi
     done < <(plesk bin site --list 2>/dev/null)
-    echo "[+] Synced $added domain(s), $skipped skipped"
-    [ "$skipped" -gt 0 ] && echo -e "[!] Not synced:$failures"
+    echo "[+] Queued $added domain(s), $skipped skipped"
+    [ "$skipped" -gt 0 ] && echo -e "[!] Not queued:$failures"
+    echo "    Delivery runs in the background: seconddns-queue status"
 fi
 
 echo ""
