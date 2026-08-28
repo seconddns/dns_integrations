@@ -37,7 +37,10 @@ except Exception:
 log "Zone created: $ZONE_NAME (cpanel hook)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
-"$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"
-log "[>] Zone $ZONE_NAME queued for SecondDNS"
+if "$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"; then
+    log "[>] Zone $ZONE_NAME queued for SecondDNS"
+else
+    log "[!] Zone $ZONE_NAME NOT queued (seconddns-queue failed)"
+fi
 
 exit 0

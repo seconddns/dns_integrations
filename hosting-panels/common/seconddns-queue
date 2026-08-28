@@ -47,10 +47,76 @@ init_db() {
         );" >/dev/null
 }
 
+# Lowercase, strip surrounding whitespace and the trailing root dot.
+# DNS names are case-insensitive; the queue stores one canonical form so
+# duplicate delivery and FIFO ordering compare equal across panels.
+normalize_domain() {
+    local d="$1"
+    d="${d#"${d%%[![:space:]]*}"}"
+    d="${d%"${d##*[![:space:]]}"}"
+    d="${d%.}"
+    printf '%s' "$d" | tr '[:upper:]' '[:lower:]'
+}
+
+# LDH per RFC 1035: labels of a-z0-9 and inner hyphens, 1-63 each, 253 total.
+valid_domain() {
+    local d="$1" label
+    [ -n "$d" ] || return 1
+    [ "${#d}" -le 253 ] || return 1
+    case "$d" in *.*) ;; *) return 1 ;; esac
+    local IFS='.'
+    for label in $d; do
+        [ -n "$label" ] || return 1
+        [ "${#label}" -le 63 ] || return 1
+        case "$label" in
+            -*|*-) return 1 ;;
+            *[!a-z0-9-]*) return 1 ;;
+        esac
+    done
+    return 0
+}
+
+valid_ip() {
+    local ip="$1"
+    case "$ip" in
+        *[!0-9a-fA-F.:]*) return 1 ;;
+        *:*) return 0 ;;
+    esac
+    local IFS='.' octet count=0
+    for octet in $ip; do
+        count=$((count + 1))
+        case "$octet" in ""|*[!0-9]*) return 1 ;; esac
+        [ "$octet" -le 255 ] || return 1
+    done
+    [ "$count" -eq 4 ]
+}
+
+# SQL literal quoting: '' escapes a single quote inside a sqlite3 string.
+sql_quote() {
+    local v="$1"
+    printf "'%s'" "${v//\'/\'\'}"
+}
+
 cmd_enqueue() {
-    local op="$1" domain="$2" master_ip="${3:-}"
+    local op="$1" domain master_ip="${3:-}"
+    case "$op" in
+        create|delete) ;;
+        *) log "[!] queue: refused unknown op '$op'"; return 2 ;;
+    esac
+    domain=$(normalize_domain "$2")
+    if ! valid_domain "$domain"; then
+        log "[!] queue: refused invalid domain '$2'"
+        return 2
+    fi
+    if [ -n "$master_ip" ] && ! valid_ip "$master_ip"; then
+        log "[!] queue: refused invalid master_ip '$master_ip' for $domain"
+        return 2
+    fi
     init_db
-    sq "INSERT INTO ops (op, domain, master_ip) VALUES ('$op', '$domain', '$master_ip');" >/dev/null
+    sq "INSERT INTO ops (op, domain, master_ip) VALUES ($(sql_quote "$op"), $(sql_quote "$domain"), $(sql_quote "$master_ip"));" >/dev/null || {
+        log "[!] queue: enqueue failed for $op $domain"
+        return 1
+    }
     log "[>] queue: enqueued $op $domain"
     # wake the delivery worker instantly (best-effort)
     python3 -c "

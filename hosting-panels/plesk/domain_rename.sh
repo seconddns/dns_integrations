@@ -44,8 +44,10 @@ OLD_ZONE=$(idn_encode "$OLD_ZONE")
 NEW_ZONE=$(idn_encode "$NEW_ZONE")
 
 QUEUE="/usr/local/bin/seconddns-queue"
-"$QUEUE" enqueue delete "$OLD_ZONE"
-"$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"
-log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
+if "$QUEUE" enqueue delete "$OLD_ZONE" && "$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"; then
+    log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
+else
+    log "[!] Zone rename $OLD_ZONE -> $NEW_ZONE NOT fully queued (seconddns-queue failed)"
+fi
 
 exit 0
