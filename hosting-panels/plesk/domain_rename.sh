@@ -41,7 +41,10 @@ done
 log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
-if "$QUEUE" enqueue delete "$OLD_ZONE" && "$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"; then
+rc=0
+"$QUEUE" enqueue delete "$OLD_ZONE" || rc=1
+"$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP" || rc=1
+if [ $rc -eq 0 ]; then
     log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
 else
     log "[!] Zone rename $OLD_ZONE -> $NEW_ZONE NOT fully queued (seconddns-queue failed)"

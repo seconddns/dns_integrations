@@ -80,6 +80,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if m=='record': self.record()
             self.reply(200, b'{"id":"z1"}')
         elif m=='dup': self.reply(404)
+        elif m=='noid': self.reply(200, b'{}')
         else: self.reply(503)
     def do_DELETE(self):
         m=self.mode()
@@ -172,6 +173,14 @@ assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id D
 rc=0; "$QUEUE" enqueue purge valid.example.com 192.0.2.10 || rc=$?
 assert_eq "$rc" 2 "rejected unknown op"
 assert_eq "$(( $(pending) - before ))" 1 "one row added"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+
+echo "== 10. delete lookup 200 without id: failed, queue continues"
+echo noid > "$TMP/mode"
+"$QUEUE" enqueue delete noid.example.com
+"$QUEUE" flush
+assert_eq "$(failed)" 1 "200-without-id marked failed"
+assert_eq "$(pending)" 0 "queue not wedged behind it"
 sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
 
 echo
