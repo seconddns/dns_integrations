@@ -15,6 +15,7 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
 API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] && exit 0
 
@@ -36,8 +37,19 @@ RAW_NOTE=""; [ "$RAW_NAME" != "$ZONE_NAME" ] && RAW_NOTE=" (received as '$RAW_NA
 
 log "Zone deleted: $ZONE_NAME (plesk event handler)$RAW_NOTE"
 
+OWNER_LIB="/usr/local/bin/seconddns-owner"
+[ -r "$OWNER_LIB" ] && SECONDDNS_OWNER_LIB=1 . "$OWNER_LIB"
+if type owner_check >/dev/null 2>&1; then
+    owner_check "$ZONE_NAME" "$MASTER_IP"
+    case $? in
+        1) log "[~] Zone $ZONE_NAME is mastered by $OWNER_IP, not this server — delete skipped"; exit 0 ;;
+        2) log "[~] Zone $ZONE_NAME owner check: API unreachable, queued; checked again at delivery" ;;
+        4) log "[!] Zone $ZONE_NAME owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check" ;;
+    esac
+fi
+
 QUEUE="/usr/local/bin/seconddns-queue"
-if "$QUEUE" enqueue delete "$ZONE_NAME"; then
+if "$QUEUE" enqueue delete "$ZONE_NAME" "$MASTER_IP"; then
     log "[>] Zone $ZONE_NAME removal queued for SecondDNS"
 else
     log "[!] Zone $ZONE_NAME removal NOT queued (seconddns-queue failed)"

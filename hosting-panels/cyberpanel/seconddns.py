@@ -109,6 +109,7 @@ def api_request(config, method, path, data=None):
 
 QUEUE_BIN = "/usr/local/bin/seconddns-queue"
 DOMAIN_BIN = "/usr/local/bin/seconddns-domain"
+OWNER_BIN = "/usr/local/bin/seconddns-owner"
 
 
 def canonical_domain(domain):
@@ -173,8 +174,20 @@ def remove_zone(config, domain):
         return False
     if domain != raw:
         logger.info("    zone name received as %r", raw)
+    master_ip = (config or {}).get("master_ip", "")
+    # is the zone mastered by this server? (skipped if the API is unreachable;
+    # the worker repeats the check at delivery)
+    try:
+        r = subprocess.run([OWNER_BIN, domain, master_ip], capture_output=True, text=True, timeout=15)
+        if r.returncode == 1:
+            logger.info("[~] Zone %s is mastered by %s, not this server — delete skipped", domain, r.stdout.strip())
+            return True
+        if r.returncode == 4:
+            logger.error("[!] Zone %s owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check", domain)
+    except Exception:
+        pass
     logger.info("[-] Removing zone: %s", domain)
-    return queue_op("delete", domain)
+    return queue_op("delete", domain, master_ip)
 
 
 def get_cyberpanel_domains():
