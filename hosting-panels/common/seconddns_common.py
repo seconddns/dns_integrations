@@ -62,28 +62,84 @@ def canonical(name):
     return (r.stdout.strip(), None) if r.returncode == 0 else (None, r.stderr.strip() or "refused")
 
 
-def panel_domains():
-    """Domain names hosted on this panel, raw as the panel reports them."""
-    def run(cmd):
+class PanelError(SystemExit):
+    pass
+
+
+def _run(cmd, timeout=30):
+    """stdout of a command, or None when it is missing, fails or hangs."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str))
+        return r.stdout if r.returncode == 0 else None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _cyberpanel_db():
+    """(user, password, name) of CyberPanel's MariaDB from its Django settings."""
+    import re
+    try:
+        text = open("/usr/local/CyberCP/CyberCP/settings.py").read()
+    except OSError:
+        return None
+    m = re.search(r"'default'\s*:\s*\{(.*?)\}", text, re.S)
+    if not m:
+        return None
+    block = m.group(1)
+    def field(k):
+        f = re.search(r"'%s'\s*:\s*'([^']*)'" % k, block)
+        return f.group(1) if f else None
+    return field("USER"), field("PASSWORD"), field("NAME")
+
+
+def panel_zones():
+    """Names of the DNS zones this panel's DNS server masters — the same set
+    the hooks act on. A panel that cannot be read is an error, never an
+    empty list: an empty list would make every zone look stale."""
+    override = os.environ.get("SECONDDNS_PANEL_ZONES_CMD")  # tests
+    if override:
+        out = _run(override)
+        source = "SECONDDNS_PANEL_ZONES_CMD"
+    elif os.path.exists("/usr/sbin/plesk") or os.path.exists("/usr/local/psa"):
+        out = _run(["plesk", "db", "-Ne", "SELECT name FROM dns_zone WHERE type='master'"])
+        source = "Plesk dns_zone"
+    elif os.path.exists("/usr/local/cpanel"):
+        raw = _run(["whmapi1", "--output=json", "listzones"])
+        out = None
+        if raw:
+            try:
+                out = "\n".join(z["domain"] for z in json.loads(raw)["data"]["zone"])
+            except (ValueError, KeyError, TypeError):
+                out = None
+        source = "whmapi1 listzones"
+    elif os.path.isdir("/usr/local/directadmin"):
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            return r.stdout if r.returncode == 0 else ""
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return ""
-    if os.path.exists("/usr/sbin/plesk") or os.path.exists("/usr/local/psa"):
-        return [l.strip() for l in run(["plesk", "bin", "site", "--list"]).splitlines() if l.strip()]
-    if os.path.exists("/etc/userdomains"):  # cPanel: "domain: user"
-        return [l.split(":", 1)[0].strip() for l in open("/etc/userdomains") if ":" in l and not l.startswith("*")]
-    if os.path.isdir("/etc/virtual"):  # DirectAdmin
-        return [d for d in os.listdir("/etc/virtual")
-                if d not in ("default", "majordomo") and os.path.isfile(f"/etc/virtual/{d}/domains")]
-    out = run(["cyberpanel", "listWebsitesJson"])
-    if out:
-        try:
-            return [s.get("domain") or s.get("domainName") for s in json.loads(out) if s]
-        except ValueError:
-            pass
-    sys.exit("could not detect the panel; use --from-file")
+            out = "\n".join(f[:-3] for f in os.listdir("/var/named") if f.endswith(".db"))
+        except OSError:
+            out = None
+        source = "/var/named/*.db"
+    elif os.path.isdir("/usr/local/CyberCP"):
+        creds = _cyberpanel_db()
+        out = None
+        if creds and all(creds):
+            user, pw, name = creds
+            out = _run(["mysql", "-u", user, f"-p{pw}", name, "-Ne", "SELECT name FROM domains"])
+        source = "CyberPanel PowerDNS domains"
+    else:
+        raise PanelError("could not detect the panel; use --from-file")
+    zones = [l.strip() for l in (out or "").splitlines() if l.strip()]
+    if out is None:
+        raise PanelError(f"could not read the zone list ({source}); refusing to continue")
+    if not zones:
+        raise PanelError(f"the panel reports no DNS zones ({source}); refusing to continue")
+    return zones
+
+
+def zones_from_file(path):
+    zones = [l.strip() for l in open(path) if l.strip() and not l.startswith("#")]
+    if not zones:
+        raise PanelError(f"{path} is empty; refusing to continue")
+    return zones
 
 
 def canonical_targets(raw_names):

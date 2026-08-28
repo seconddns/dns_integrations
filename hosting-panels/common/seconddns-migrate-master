@@ -4,9 +4,9 @@
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
 """Re-point SecondDNS zones to this server after a panel migration.
 
-Lists the zones of the subscription, picks those hosted on this panel
-(default) or all of them (--all), and changes masterIp to this server's
-address via PATCH. Dry run by default; --apply makes the change.
+Lists the zones of the subscription, picks those this panel's DNS server
+masters (default) or all of them (--all), and changes masterIp to this
+server's address via PATCH. Dry run by default; --apply makes the change.
 
   seconddns-migrate-master [--apply] [--all | --from-file FILE]
                            [--master-ip IP] [--config PATH]
@@ -19,7 +19,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from seconddns_common import api, load_config, panel_domains, canonical_targets  # noqa: E402
+from seconddns_common import api, load_config, panel_zones, zones_from_file, canonical_targets  # noqa: E402
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
     if a.all:
         targets = sorted(by_name)
     else:
-        raw = [l.strip() for l in open(a.from_file)] if a.from_file else panel_domains()
+        raw = zones_from_file(a.from_file) if a.from_file else panel_zones()
         targets, skipped = canonical_targets(raw)
 
     to_change, already, absent = [], [], []

@@ -101,9 +101,9 @@ When domains move between two panel servers that share one SecondDNS account,
 two things keep the zones right: every delete hook checks that the zone is
 mastered by this server before deleting it (`delete_check_master_ip`, on by
 default), and `seconddns-migrate-master` re-points the moved zones to the new
-server with one `PATCH` per zone. `seconddns-reconcile` compares the panel
-with SecondDNS and, with `--add-missing` / `--remove-stale --apply`, queues
-the difference. Order of operations, options and the config key are in
+server with one `PATCH` per zone. `seconddns-reconcile` compares the DNS
+zones the panel masters with SecondDNS and, with `--add-missing` /
+`--remove-stale --apply`, queues the difference. Order of operations, options and the config key are in
 [MIGRATION.md](MIGRATION.md).
 
 ---
