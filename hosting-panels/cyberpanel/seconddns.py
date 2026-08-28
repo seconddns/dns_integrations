@@ -103,6 +103,37 @@ def api_request(config, method, path, data=None):
         except Exception:
             error_data = {"error": error_body}
         return {"_status": e.code, **error_data}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return {"_status": 0, "error": str(e)}
+
+
+QUEUE_BIN = "/usr/local/bin/seconddns-queue"
+DOMAIN_BIN = "/usr/local/bin/seconddns-domain"
+
+
+def canonical_domain(domain):
+    """Lowercase + Punycode + LDH via the shared tool. Returns (name, None) or (None, reason)."""
+    try:
+        r = subprocess.run([DOMAIN_BIN, domain], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        return None, str(e)
+    if r.returncode != 0:
+        return None, r.stderr.strip() or "refused"
+    return r.stdout.strip(), None
+
+
+def queue_op(op, domain, master_ip=""):
+    """Persist the operation in the local offline queue.
+
+    The seconddns-queued systemd worker delivers it in FIFO order."""
+    try:
+        subprocess.run([QUEUE_BIN, "enqueue", op, domain, master_ip],
+                       check=True, timeout=10)
+        logger.info("    %s %s queued for delivery", op, domain)
+        return True
+    except Exception as e:
+        logger.error("    Failed to enqueue %s %s: %s", op, domain, e)
+        return False
 
 
 def list_zones(config):
@@ -114,24 +145,14 @@ def list_zones(config):
 
 
 def add_zone(config, domain):
-    domain = domain.lower().rstrip(".")
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
+        return False
     if not config or not config.get("master_ip"):
         return False
     logger.info("[+] Adding zone: %s (master: %s)", domain, config["master_ip"])
-    result = api_request(config, "POST", "/api/zones", {
-        "name": domain,
-        "masterIp": config["master_ip"],
-    })
-    if result and result.get("_status"):
-        status = result["_status"]
-        error = result.get("error", "Unknown error")
-        if status == 409:
-            logger.info("    Already exists, skipping.")
-        else:
-            logger.error("    Error (%s): %s", status, error)
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("create", domain, config["master_ip"])
 
 
 def find_zone_by_name(config, domain):
@@ -142,18 +163,12 @@ def find_zone_by_name(config, domain):
 
 
 def remove_zone(config, domain):
-    domain = domain.lower().rstrip(".")
-    zone = find_zone_by_name(config, domain)
-    if not zone:
-        logger.info("[-] Zone %s not found on secondary DNS.", domain)
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
         return False
     logger.info("[-] Removing zone: %s", domain)
-    result = api_request(config, "DELETE", f"/api/zones/{zone['id']}")
-    if result and result.get("_status"):
-        logger.error("    Error (%s): %s", result.get("_status"), result.get("error", str(result)))
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("delete", domain)
 
 
 def get_cyberpanel_domains():
