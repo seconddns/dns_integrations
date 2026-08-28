@@ -8,7 +8,8 @@
 # Sourced by bash hooks (SECONDDNS_OWNER_LIB=1) or run as a CLI:
 #   seconddns-owner <domain> [master_ip]
 # Exit: 0 = ours or absent (go ahead), 1 = mastered by another server (prints
-# its IP), 2 = could not check (API unreachable), 3 = check disabled in config.
+# its IP), 2 = could not check (API unreachable or odd answer), 3 = check
+# disabled in config, 4 = api_url/api_key/master_ip missing in config.
 #
 # Config (/etc/seconddns.conf): delete_check_master_ip = true|false, default true.
 
@@ -27,7 +28,7 @@ owner_check() {
     api_url=$(conf_get api_url); api_url="${api_url%/}"
     api_key=$(conf_get api_key)
     [ -n "$my" ] || my=$(conf_get master_ip)
-    [ -n "$api_url" ] && [ -n "$api_key" ] && [ -n "$my" ] || return 2
+    [ -n "$api_url" ] && [ -n "$api_key" ] && [ -n "$my" ] || return 4
     body=$(curl -s --max-time 10 -w '\n%{http_code}' -H "X-API-Key: $api_key" \
         "$api_url/api/zones/by-name/$domain" 2>/dev/null) || return 2
     code="${body##*$'\n'}"; body="${body%$'\n'*}"

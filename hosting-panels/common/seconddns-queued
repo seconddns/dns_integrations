@@ -221,7 +221,16 @@ def send_op(cfg, op, domain, master_ip):
         if code in (200, 201):
             return DONE, detail(code, data)
         if code == 409:
-            log(f"[~] worker: zone {domain} already exists (treated as success)")
+            # exists: under this key on another master (migration pending),
+            # or under another account on the same DNS server
+            gcode, zone = api(cfg, "GET", f"/api/zones/by-name/{domain}")
+            owner = zone.get("masterIp") if gcode == 200 else None
+            if gcode == 404:
+                log(f"[!] worker: zone {domain} exists under another account on this DNS server (treated as done)")
+            elif owner and master_ip and owner != master_ip:
+                log(f"[!] worker: zone {domain} exists, mastered by {owner} not {master_ip} — run seconddns-migrate-master (treated as done)")
+            else:
+                log(f"[~] worker: zone {domain} already exists (treated as success)")
             return DONE, detail(code, data)
         if code in (400, 422):
             return FAILED, detail(code, data)

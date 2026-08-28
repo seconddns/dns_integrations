@@ -182,6 +182,8 @@ def remove_zone(config, domain):
         if r.returncode == 1:
             logger.info("[~] Zone %s is mastered by %s, not this server — delete skipped", domain, r.stdout.strip())
             return True
+        if r.returncode == 4:
+            logger.error("[!] Zone %s owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check", domain)
     except Exception:
         pass
     logger.info("[-] Removing zone: %s", domain)

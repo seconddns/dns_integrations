@@ -40,6 +40,7 @@ if type owner_check >/dev/null 2>&1; then
     case $? in
         1) log "[~] Zone $domain is mastered by $OWNER_IP, not this server — delete skipped"; exit 0 ;;
         2) log "[~] Zone $domain owner check: API unreachable, queued; checked again at delivery" ;;
+        4) log "[!] Zone $domain owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check" ;;
     esac
 fi
 

@@ -51,6 +51,7 @@ if type owner_check >/dev/null 2>&1; then
     case $? in
         1) log "[~] Zone $OLD_ZONE is mastered by $OWNER_IP, not this server — delete skipped"; DELETE_OLD=0 ;;
         2) log "[~] Zone $OLD_ZONE owner check: API unreachable, queued; checked again at delivery" ;;
+        4) log "[!] Zone $OLD_ZONE owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check" ;;
     esac
 fi
 

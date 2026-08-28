@@ -82,7 +82,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if m in ('ok','record'):
             if m=='record': self.record()
             self.reply(201, b'{"id":"z1"}')
-        elif m=='dup': self.reply(409, b'{"error":"exists"}')
+        elif m in ('dup','dup-other','dup-foreign'): self.reply(409, b'{"error":"exists"}')
         elif m=='badreq': self.reply(400, b'{"error":"invalid"}')
         else: self.reply(503)
     def do_GET(self):
@@ -97,9 +97,9 @@ class H(http.server.BaseHTTPRequestHandler):
         if m in ('ok','record'):
             if m=='record': self.record()
             self.reply(200, b'{"id":"z1","masterIp":"192.0.2.10"}')
-        elif m=='owned-other':
+        elif m in ('owned-other','dup-other'):
             self.record(); self.reply(200, b'{"id":"z1","masterIp":"192.0.2.99"}')
-        elif m=='dup': self.reply(404)
+        elif m in ('dup','dup-foreign'): self.reply(404)
         elif m=='noid': self.reply(200, b'{}')
         else: self.reply(503)
     def do_PATCH(self):
@@ -338,6 +338,18 @@ OFFCONF="$TMP/off.conf"; sed 's/^master_ip = .*/&\ndelete_check_master_ip = fals
 SECONDDNS_CONF="$OFFCONF" "$QUEUE" flush >/dev/null
 grep -q "DELETE" "$TMP/requests.log" && ok "delete_check_master_ip=false deletes" || fail "check=false did not delete"
 
+echo "== 18b. worker: create 409 names the other master"
+echo dup-other > "$TMP/mode"
+"$QUEUE" enqueue create moved.example.com 192.0.2.10
+"$QUEUE" flush >/dev/null
+assert_eq "$(pending)" 0 "409 still completes the op"
+grep -q "moved.example.com exists, mastered by 192.0.2.99 not 192.0.2.10 — run seconddns-migrate-master" "$SECONDDNS_LOG" \
+    && ok "log points at seconddns-migrate-master" || fail "409 log line missing"
+echo dup-foreign > "$TMP/mode"
+"$QUEUE" enqueue create taken.example.com 192.0.2.10
+"$QUEUE" flush >/dev/null
+grep -q "taken.example.com exists under another account" "$SECONDDNS_LOG" && ok "409 + by-name 404 named as another account" || fail "foreign 409 log missing"
+
 echo "== 19. hook side: seconddns-owner"
 OWNER="$HERE/../seconddns-owner"
 echo ok > "$TMP/mode"
@@ -351,6 +363,8 @@ echo down > "$TMP/mode"
 "$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 2 "API down -> 2"
 echo owned-other > "$TMP/mode"
 SECONDDNS_CONF="$OFFCONF" "$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 3 "disabled in config -> 3"
+NOIPCONF="$TMP/noip.conf"; grep -v '^master_ip' "$SECONDDNS_CONF" > "$NOIPCONF"
+SECONDDNS_CONF="$NOIPCONF" "$OWNER" x.example.com >/dev/null; assert_eq "$?" 4 "master_ip missing in config -> 4, not 2"
 ( SECONDDNS_OWNER_LIB=1 . "$OWNER"; owner_check x.example.com 192.0.2.10; [ $? -eq 1 ] && [ "$OWNER_IP" = "192.0.2.99" ] ) \
     && ok "sourced: owner_check sets OWNER_IP" || fail "sourced owner_check"
 
