@@ -70,3 +70,7 @@ plesk bin event_handler --list | grep seconddns
 ```bash
 dig @localhost example.com AXFR
 ```
+
+## Moving to another server
+
+See [MIGRATION.md](../../MIGRATION.md): deletes check the zone's master first, and `seconddns-migrate-master` re-points moved zones to the new server.

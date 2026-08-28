@@ -43,9 +43,21 @@ done
 
 log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)$RAW_NOTE"
 
+OWNER_LIB="/usr/local/bin/seconddns-owner"
+[ -r "$OWNER_LIB" ] && SECONDDNS_OWNER_LIB=1 . "$OWNER_LIB"
+DELETE_OLD=1
+if type owner_check >/dev/null 2>&1; then
+    owner_check "$OLD_ZONE" "$MASTER_IP"
+    case $? in
+        1) log "[~] Zone $OLD_ZONE is mastered by $OWNER_IP, not this server — delete skipped"; DELETE_OLD=0 ;;
+        2) log "[~] Zone $OLD_ZONE owner check: API unreachable, queued; checked again at delivery" ;;
+        4) log "[!] Zone $OLD_ZONE owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check" ;;
+    esac
+fi
+
 QUEUE="/usr/local/bin/seconddns-queue"
 rc=0
-"$QUEUE" enqueue delete "$OLD_ZONE" || rc=1
+[ $DELETE_OLD -eq 1 ] && { "$QUEUE" enqueue delete "$OLD_ZONE" "$MASTER_IP" || rc=1; }
 "$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP" || rc=1
 if [ $rc -eq 0 ]; then
     log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
