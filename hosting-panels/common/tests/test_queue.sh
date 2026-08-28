@@ -88,15 +88,29 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.special(): return
         m=self.mode()
+        if self.path.split('?')[0]=='/api/zones' and m in ('ok','record'):
+            if m=='record': self.record()
+            self.reply(200, json.dumps([
+                {"id":"a","name":"mine.example.com","masterIp":"192.0.2.10"},
+                {"id":"b","name":"old.example.com","masterIp":"192.0.2.99"},
+                {"id":"c","name":"other.example.com","masterIp":"192.0.2.99"}]).encode()); return
         if m in ('ok','record'):
             if m=='record': self.record()
-            self.reply(200, b'{"id":"z1"}')
+            self.reply(200, b'{"id":"z1","masterIp":"192.0.2.10"}')
+        elif m=='owned-other':
+            self.record(); self.reply(200, b'{"id":"z1","masterIp":"192.0.2.99"}')
         elif m=='dup': self.reply(404)
         elif m=='noid': self.reply(200, b'{}')
         else: self.reply(503)
+    def do_PATCH(self):
+        self.rfile.read(int(self.headers.get('Content-Length',0)))
+        if self.special(): return
+        self.record(); self.reply(200, b'{}')
     def do_DELETE(self):
         if self.special(): return
         m=self.mode()
+        if m=='owned-other':
+            self.record(); self.reply(204, b''); return
         if m in ('ok','record'):
             if m=='record': self.record()
             self.reply(204, b'')
@@ -306,6 +320,63 @@ assert_eq "$rc" 0 "flush yields to the worker"
 for i in $(seq 1 8); do [ "$(pending)" = 0 ] && break; sleep 1; done
 assert_eq "$(pending)" 0 "delivered within ${i}s after flush"
 kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+
+echo "== 18. worker: delete skipped when the zone is mastered elsewhere"
+echo owned-other > "$TMP/mode"; : > "$TMP/requests.log"
+"$QUEUE" enqueue delete moved.example.com 192.0.2.10
+"$QUEUE" flush >/dev/null
+assert_eq "$(pending)" 0 "op completed"
+grep -q "DELETE" "$TMP/requests.log" && fail "DELETE was sent" || ok "no DELETE sent"
+grep -q "mastered by 192.0.2.99, not 192.0.2.10 — delete skipped" "$SECONDDNS_LOG" && ok "skip logged with both IPs" || fail "skip not logged"
+: > "$TMP/requests.log"
+"$QUEUE" enqueue delete legacy.example.com
+"$QUEUE" flush >/dev/null
+grep -q "DELETE" "$TMP/requests.log" && ok "op without master_ip deletes as before" || fail "legacy op did not delete"
+OFFCONF="$TMP/off.conf"; sed 's/^master_ip = .*/&\ndelete_check_master_ip = false/' "$SECONDDNS_CONF" > "$OFFCONF"
+: > "$TMP/requests.log"
+"$QUEUE" enqueue delete moved2.example.com 192.0.2.10
+SECONDDNS_CONF="$OFFCONF" "$QUEUE" flush >/dev/null
+grep -q "DELETE" "$TMP/requests.log" && ok "delete_check_master_ip=false deletes" || fail "check=false did not delete"
+
+echo "== 19. hook side: seconddns-owner"
+OWNER="$HERE/../seconddns-owner"
+echo ok > "$TMP/mode"
+"$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 0 "mine -> 0"
+echo owned-other > "$TMP/mode"
+out=$("$OWNER" x.example.com 192.0.2.10); rc=$?
+assert_eq "$rc" 1 "other master -> 1"; assert_eq "$out" "192.0.2.99" "prints the owner"
+echo dup > "$TMP/mode"
+"$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 0 "absent (404) -> 0"
+echo down > "$TMP/mode"
+"$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 2 "API down -> 2"
+echo owned-other > "$TMP/mode"
+SECONDDNS_CONF="$OFFCONF" "$OWNER" x.example.com 192.0.2.10 >/dev/null; assert_eq "$?" 3 "disabled in config -> 3"
+( SECONDDNS_OWNER_LIB=1 . "$OWNER"; owner_check x.example.com 192.0.2.10; [ $? -eq 1 ] && [ "$OWNER_IP" = "192.0.2.99" ] ) \
+    && ok "sourced: owner_check sets OWNER_IP" || fail "sourced owner_check"
+
+echo "== 20. seconddns-migrate-master"
+MIG="$HERE/../seconddns-migrate-master"
+export SECONDDNS_DOMAIN_BIN="$HERE/../seconddns-domain"
+printf 'mine.example.com\nOLD.example.com\nmissing.example.com\nbad_name.com\n' > "$TMP/domains.txt"
+echo record > "$TMP/mode"; : > "$TMP/requests.log"
+out=$("$MIG" --from-file "$TMP/domains.txt"); rc=$?
+assert_eq "$rc" 0 "dry run exits 0"
+grep -q "PATCH" "$TMP/requests.log" && fail "dry run sent a PATCH" || ok "dry run sends no PATCH"
+[[ "$out" == *"old.example.com: 192.0.2.99 -> 192.0.2.10"* ]] && ok "plans old.example.com" || fail "plan missing: $out"
+[[ "$out" == *"1 to change, 1 already 192.0.2.10, 1 not in SecondDNS, 1 invalid"* ]] && ok "summary counts" || fail "summary: $out"
+: > "$TMP/requests.log"
+"$MIG" --from-file "$TMP/domains.txt" --apply >/dev/null; rc=$?
+assert_eq "$rc" 0 "apply exits 0"
+assert_eq "$(grep -c PATCH "$TMP/requests.log")" 1 "apply sends exactly one PATCH"
+grep -q "PATCH /api/zones/b" "$TMP/requests.log" && ok "PATCH hits the moved zone" || fail "wrong PATCH target"
+: > "$TMP/requests.log"
+"$MIG" --from-file "$TMP/domains.txt" --master-ip 192.0.2.77 --apply >/dev/null
+assert_eq "$(grep -c PATCH "$TMP/requests.log")" 2 "--master-ip overrides config (both zones differ now)"
+: > "$TMP/requests.log"
+"$MIG" --all --apply >/dev/null
+assert_eq "$(grep -c PATCH "$TMP/requests.log")" 2 "--all reaches zones not on this panel"
+grep -q "PATCH /api/zones/c" "$TMP/requests.log" && ok "other.example.com included with --all" || fail "--all missed c"
+unset SECONDDNS_DOMAIN_BIN
 
 echo
 echo "passed: $PASS, failed: $FAIL"

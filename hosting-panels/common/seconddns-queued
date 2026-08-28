@@ -91,6 +91,7 @@ def load_config():
     return {
         "api_url": api_url.rstrip("/"),
         "api_key": api_key,
+        "delete_check_master_ip": cp.getboolean("seconddns", "delete_check_master_ip", fallback=True),
         "poll_interval": cp.getint("queue", "poll_interval", fallback=60),
         "http_timeout": cp.getint("queue", "http_timeout", fallback=15),
         "backoff_min": cp.getint("queue", "backoff_min", fallback=30),
@@ -238,6 +239,10 @@ def send_op(cfg, op, domain, master_ip):
             return FAILED, "HTTP 200 without id"
         if code != 200:
             return RETRY, detail(code, zone)
+        owner = zone.get("masterIp")
+        if master_ip and owner and owner != master_ip and cfg["delete_check_master_ip"]:
+            log(f"[~] worker: zone {domain} is mastered by {owner}, not {master_ip} — delete skipped")
+            return DONE, f"skipped, mastered by {owner}"
         code, data = api(cfg, "DELETE", f"/api/zones/{zone['id']}")
         if code in (200, 204, 404):
             return DONE, detail(code, data)

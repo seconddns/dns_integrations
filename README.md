@@ -95,6 +95,15 @@ systemctl status seconddns-queued   # delivery worker
 
 Requires `sqlite3` and `python3` (both present by default on all supported panels).
 
+## Migrating a panel server
+
+When domains move between two panel servers that share one SecondDNS account,
+two things keep the zones right: every delete hook checks that the zone is
+mastered by this server before deleting it (`delete_check_master_ip`, on by
+default), and `seconddns-migrate-master` re-points the moved zones to the new
+server with one `PATCH` per zone. Order of operations, options and the
+config key are in [MIGRATION.md](MIGRATION.md).
+
 ---
 
 ## Monitoring
