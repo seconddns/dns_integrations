@@ -19,6 +19,14 @@ API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] && exit 0
 [ -z "$domain" ] && exit 0
 
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+if ! canonical_domain "$domain"; then
+    log "[!] Zone '$domain' refused: $DOMAIN_ERROR (directadmin hook)"
+    exit 0
+fi
+domain="$DOMAIN"
 log "Zone deleted: $domain (user=$USERNAME)"
 
 QUEUE="/usr/local/bin/seconddns-queue"

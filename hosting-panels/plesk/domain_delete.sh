@@ -22,15 +22,16 @@ API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
 ZONE_NAME="${OLD_DOMAIN_ALIAS_NAME:-$OLD_DOMAIN_NAME}"
 [ -z "$ZONE_NAME" ] && exit 0
 
-log "Zone deleted: $ZONE_NAME (plesk event handler)"
-
-# Convert IDN to Punycode if idn2/idn is available
-if command -v idn2 &>/dev/null; then
-    ZONE_NAME=$(idn2 --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
-elif command -v idn &>/dev/null; then
-    ZONE_NAME=$(idn --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+if ! canonical_domain "$ZONE_NAME"; then
+    log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (plesk event handler)"
+    exit 0
 fi
-# If neither is available, the domain name is sent as-is (API will handle it)
+ZONE_NAME="$DOMAIN"
+
+log "Zone deleted: $ZONE_NAME (plesk event handler)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
 if "$QUEUE" enqueue delete "$ZONE_NAME"; then

@@ -27,21 +27,18 @@ NEW_ZONE="${NEW_DOMAIN_ALIAS_NAME:-$NEW_DOMAIN_NAME}"
 # Not a rename — domain_update fires for all changes, not only renames
 [ "$OLD_ZONE" = "$NEW_ZONE" ] && exit 0
 
-log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
-
-idn_encode() {
-    local name="$1"
-    if command -v idn2 &>/dev/null; then
-        idn2 --quiet "$name" 2>/dev/null || echo "$name"
-    elif command -v idn &>/dev/null; then
-        idn --quiet "$name" 2>/dev/null || echo "$name"
-    else
-        echo "$name"
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+for var in OLD_ZONE NEW_ZONE; do
+    if ! canonical_domain "${!var}"; then
+        log "[!] Zone '${!var}' refused: $DOMAIN_ERROR (plesk event handler)"
+        exit 0
     fi
-}
+    printf -v "$var" '%s' "$DOMAIN"
+done
 
-OLD_ZONE=$(idn_encode "$OLD_ZONE")
-NEW_ZONE=$(idn_encode "$NEW_ZONE")
+log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
 
 QUEUE="/usr/local/bin/seconddns-queue"
 if "$QUEUE" enqueue delete "$OLD_ZONE" && "$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP"; then

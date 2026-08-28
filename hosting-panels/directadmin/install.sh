@@ -172,10 +172,12 @@ done
 echo ""
 echo "--- Installing offline operation queue ---"
 COMMON_URL="${REPO_URL%/*}/common"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-domain "$COMMON_URL/seconddns-domain?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-queue?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
-chmod +x /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 if ! command -v sqlite3 &>/dev/null; then
     echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"

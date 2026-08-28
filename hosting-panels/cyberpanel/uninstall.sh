@@ -92,5 +92,5 @@ echo "Delete them manually via Dashboard or API if needed."
 systemctl disable --now seconddns-queued.service 2>/dev/null
 rm -f /etc/systemd/system/seconddns-queued.service
 systemctl daemon-reload 2>/dev/null
-rm -f /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+rm -f /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 rm -rf /var/lib/seconddns
