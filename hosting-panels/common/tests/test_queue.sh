@@ -282,6 +282,31 @@ SECONDDNS_QUEUE_SOCK="$TMP/absent.sock" "$QUEUE" enqueue create wake.example.com
 grep -q "wakeup failed, worker will pick it up within 1s" "$SECONDDNS_LOG" && ok "wakeup failure logged with poll interval" || fail "wakeup log line"
 echo ok > "$TMP/mode"; "$QUEUE" flush >/dev/null
 
+echo "== 17. backoff sleep is cut short by a wakeup"
+SLOWCONF="$TMP/slow.conf"; sed 's/^backoff_min = .*/backoff_min = 30/; s/^backoff_max = .*/backoff_max = 60/' "$SECONDDNS_CONF" > "$SLOWCONF"
+echo down > "$TMP/mode"
+"$QUEUE" enqueue create slow1.example.com 192.0.2.10
+SECONDDNS_CONF="$SLOWCONF" "$WORKER" & DPID=$!
+sleep 2
+grep -q "retry in 30s" "$SECONDDNS_LOG" && ok "worker is in a 30s backoff" || fail "no 30s backoff in log"
+echo ok > "$TMP/mode"
+# a) a new enqueue wakes it
+"$QUEUE" enqueue create slow2.example.com 192.0.2.10
+for i in $(seq 1 8); do [ "$(pending)" = 0 ] && break; sleep 1; done
+assert_eq "$(pending)" 0 "both ops delivered within ${i}s, not 30"
+grep -q "woken up, retrying now" "$SECONDDNS_LOG" && ok "wakeup logged" || fail "wakeup not logged"
+# b) flush while the daemon sleeps wakes it too
+echo down > "$TMP/mode"
+"$QUEUE" enqueue create slow3.example.com 192.0.2.10
+sleep 2
+echo ok > "$TMP/mode"
+out=$("$QUEUE" flush 2>&1); rc=$?
+assert_eq "$rc" 0 "flush yields to the worker"
+[[ "$out" == *"asked it to retry now"* ]] && ok "flush sent a wakeup" || fail "flush output: $out"
+for i in $(seq 1 8); do [ "$(pending)" = 0 ] && break; sleep 1; done
+assert_eq "$(pending)" 0 "delivered within ${i}s after flush"
+kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+
 echo
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
