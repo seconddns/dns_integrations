@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+"""Compare the DNS zones this panel masters with the zones in SecondDNS, and fix the difference.
+
+  seconddns-reconcile                      report: missing / stale / master mismatch / ok
+  seconddns-reconcile --add-missing        show what would be created
+  seconddns-reconcile --remove-stale       show what would be deleted
+  seconddns-reconcile --add-missing --remove-stale --apply   do it, through the queue
+
+missing  = zone on the panel, not in SecondDNS      -> create (with --add-missing)
+stale    = in SecondDNS, not a zone on the panel    -> delete (with --remove-stale),
+           only when mastered by this server; others are always skipped.
+           Refused when it would remove more than half of this server's
+           zones, unless --force-bulk-delete is given.
+mismatch = in both, mastered elsewhere             -> reported; see seconddns-migrate-master
+
+Changes go through seconddns-queue, so delivery has retry, FIFO and the
+delete-side ownership check. Dry run unless --apply is given.
+Exit 0 = nothing failed, 1 = an enqueue failed or the API could not be read.
+"""
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from seconddns_common import api, load_config, panel_zones, zones_from_file, canonical_targets, enqueue  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--add-missing", action="store_true", help="create zones for panel domains missing in SecondDNS")
+    ap.add_argument("--remove-stale", action="store_true", help="delete zones that are no longer on this panel (own master only)")
+    ap.add_argument("--apply", action="store_true", help="queue the operations (default: show them)")
+    ap.add_argument("--force-bulk-delete", action="store_true", help="allow --remove-stale to drop more than half of this server's zones")
+    ap.add_argument("--from-file", metavar="FILE", help="zone list, one per line, instead of asking the panel")
+    ap.add_argument("--config", default=os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf"))
+    a = ap.parse_args()
+
+    cfg = load_config(a.config)
+    my = cfg["master_ip"]
+    if not my:
+        sys.exit("master_ip missing in the config")
+
+    code, zones = api(cfg, "GET", "/api/zones", ua="SecondDNS-Reconcile/1.0")
+    if code != 200 or not isinstance(zones, list):
+        sys.exit(f"GET /api/zones failed: HTTP {code} {zones.get('error', '') if isinstance(zones, dict) else ''}")
+    by_name = {z["name"]: z for z in zones}
+
+    raw = zones_from_file(a.from_file) if a.from_file else panel_zones()
+    panel, skipped = canonical_targets(raw)
+    if not panel:
+        sys.exit("no usable zone names from the panel; refusing to continue")
+    panel_set = set(panel)
+
+    missing = [n for n in panel if n not in by_name]
+    ok = [n for n in panel if n in by_name and by_name[n].get("masterIp") == my]
+    mismatch = [by_name[n] for n in panel if n in by_name and by_name[n].get("masterIp") != my]
+    stale = [z for n, z in sorted(by_name.items()) if n not in panel_set]
+    stale_mine = [z for z in stale if z.get("masterIp") == my]
+    stale_other = [z for z in stale if z.get("masterIp") != my]
+
+    print(f"panel: {len(panel)} zone(s); SecondDNS: {len(zones)} zone(s); master {my}")
+    print(f"  ok: {len(ok)}   missing: {len(missing)}   stale: {len(stale)} "
+          f"({len(stale_mine)} mine, {len(stale_other)} mastered elsewhere)   master mismatch: {len(mismatch)}")
+    for n in missing:
+        print(f"  missing:  {n}")
+    for z in stale_mine:
+        print(f"  stale:    {z['name']}")
+    for z in stale_other:
+        print(f"  stale:    {z['name']}  (mastered by {z.get('masterIp')}, never deleted from here)")
+    for z in mismatch:
+        print(f"  mismatch: {z['name']}  mastered by {z.get('masterIp')} — see seconddns-migrate-master")
+    for n, why in skipped:
+        print(f"  invalid:  {n} ({why})")
+
+    if not (a.add_missing or a.remove_stale):
+        sys.exit(0)
+
+    mode = "APPLY" if a.apply else "DRY RUN"
+    failed = 0
+    mine_total = sum(1 for z in zones if z.get("masterIp") == my)
+    if a.remove_stale and stale_mine and (stale_mine == [z for z in zones if z.get("masterIp") == my] or len(stale_mine) * 2 > mine_total):
+        msg = (f"--remove-stale would delete {len(stale_mine)} of {mine_total} zone(s) mastered by this server; "
+               "that looks like a wrong zone list, not a cleanup")
+        if not a.force_bulk_delete:
+            sys.exit(msg + ". Check the report; --force-bulk-delete overrides.")
+        print("[!] " + msg + " — proceeding on --force-bulk-delete")
+    if a.add_missing:
+        for n in missing:
+            if a.apply:
+                okq = enqueue("create", n, my)
+                failed += 0 if okq else 1
+                print(f"[{mode}] create {n}  [{'queued' if okq else 'ENQUEUE FAILED'}]")
+            else:
+                print(f"[{mode}] create {n}")
+    if a.remove_stale:
+        for z in stale_mine:
+            if a.apply:
+                okq = enqueue("delete", z["name"], my)
+                failed += 0 if okq else 1
+                print(f"[{mode}] delete {z['name']}  [{'queued' if okq else 'ENQUEUE FAILED'}]")
+            else:
+                print(f"[{mode}] delete {z['name']}")
+        for z in stale_other:
+            print(f"[{mode}] delete {z['name']}  [skipped: mastered by {z.get('masterIp')}]")
+    if a.apply:
+        print("delivery runs in the background: seconddns-queue status")
+    else:
+        print("re-run with --apply to queue the operations")
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()

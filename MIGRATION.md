@@ -49,6 +49,30 @@ and goes through the same name canonicalisation as the hooks, so IDN names
 match their Punycode zones. Zones not hosted on this panel are left alone
 unless you pass `--all`.
 
+**`seconddns-reconcile` shows the difference.** It compares the **DNS
+zones this panel's DNS server masters** — the same set the hooks act on —
+with the zones in SecondDNS. The list comes from Plesk's `dns_zone` table,
+`whmapi1 listzones` on cPanel, `/var/named/*.db` on DirectAdmin, the
+PowerDNS `domains` table on CyberPanel; `--from-file` replaces it. Sites and
+subdomains without a zone of their own are not in that list, and DNS-only
+zones (mail, parked, zones added in the panel's DNS manager) are.
+
+Four lists: `ok`, `missing` (a zone on the panel only), `stale` (in
+SecondDNS only — meaning *not a zone on this panel*, not *unneeded*; each
+with its master), `mismatch` (in both, mastered elsewhere — that is
+`seconddns-migrate-master`'s job). `--add-missing` and `--remove-stale`
+show what would be queued; add `--apply` to queue it. A stale zone mastered
+by another server is never deleted from here. If the panel cannot be read
+or reports no zones the tool stops instead of treating everything as stale,
+and `--remove-stale` refuses to drop more than half of this server's zones
+unless you pass `--force-bulk-delete`.
+
+```bash
+seconddns-reconcile                                   # report only
+seconddns-reconcile --add-missing --remove-stale      # what would change
+seconddns-reconcile --add-missing --remove-stale --apply
+```
+
 ## Order of operations
 
 1. Install the integration on the new server (same API key as the old one).
@@ -65,7 +89,9 @@ unless you pass `--all`.
    that ships `seconddns-owner`), then delete the domains there. Each delete
    is skipped with a log line because the zone is now mastered by the new
    server.
-5. Uninstall the integration on the old server once it is empty.
+5. `seconddns-reconcile` on the new server: everything should be `ok`;
+   `--add-missing --apply` picks up anything the migration left behind.
+6. Uninstall the integration on the old server once it is empty.
 
 Accounts that stay on the old server for a while are not touched by
 `seconddns-migrate-master` unless you pass `--all`; their zones keep the old

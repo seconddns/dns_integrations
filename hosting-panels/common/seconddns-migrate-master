@@ -4,9 +4,9 @@
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
 """Re-point SecondDNS zones to this server after a panel migration.
 
-Lists the zones of the subscription, picks those hosted on this panel
-(default) or all of them (--all), and changes masterIp to this server's
-address via PATCH. Dry run by default; --apply makes the change.
+Lists the zones of the subscription, picks those this panel's DNS server
+masters (default) or all of them (--all), and changes masterIp to this
+server's address via PATCH. Dry run by default; --apply makes the change.
 
   seconddns-migrate-master [--apply] [--all | --from-file FILE]
                            [--master-ip IP] [--config PATH]
@@ -15,86 +15,11 @@ masterIp comes from /etc/seconddns.conf; --master-ip overrides it.
 Exit 0 = nothing failed, 1 = at least one PATCH or lookup failed.
 """
 import argparse
-import configparser
-import json
 import os
-import subprocess
 import sys
-import urllib.error
-import urllib.request
 
-DOMAIN_BIN = os.environ.get("SECONDDNS_DOMAIN_BIN", "/usr/local/bin/seconddns-domain")
-UA = "SecondDNS-MigrateMaster/1.0"
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):
-        return None
-
-
-OPENER = urllib.request.build_opener(_NoRedirect)
-
-
-def api(cfg, method, path, payload=None):
-    body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(cfg["api_url"] + path, data=body, method=method, headers={
-        "X-API-Key": cfg["api_key"], "Content-Type": "application/json", "User-Agent": UA})
-    try:
-        with OPENER.open(req, timeout=15) as r:
-            raw = r.read()
-            try:
-                return r.status, (json.loads(raw) if raw else {})
-            except ValueError:
-                return 0, {"error": f"HTTP {r.status} with non-JSON body"}
-    except urllib.error.HTTPError as e:
-        try:
-            return e.code, json.loads(e.read())
-        except Exception:
-            return e.code, {}
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return 0, {"error": f"network: {e}"}
-
-
-def load_config(path):
-    cp = configparser.ConfigParser()
-    cp.read(path)
-    cfg = {
-        "api_url": cp.get("seconddns", "api_url", fallback="").strip().rstrip("/"),
-        "api_key": cp.get("seconddns", "api_key", fallback="").strip(),
-        "master_ip": cp.get("seconddns", "master_ip", fallback="").strip(),
-    }
-    if not cfg["api_url"] or not cfg["api_key"]:
-        sys.exit(f"api_url/api_key missing in {path}")
-    return cfg
-
-
-def canonical(name):
-    r = subprocess.run([DOMAIN_BIN, name], capture_output=True, text=True)
-    return (r.stdout.strip(), None) if r.returncode == 0 else (None, r.stderr.strip() or "refused")
-
-
-def panel_domains():
-    """Domain names hosted on this panel, raw as the panel reports them."""
-    def run(cmd):
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            return r.stdout if r.returncode == 0 else ""
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return ""
-    if os.path.exists("/usr/sbin/plesk") or os.path.exists("/usr/local/psa"):
-        return [l.strip() for l in run(["plesk", "bin", "site", "--list"]).splitlines() if l.strip()]
-    if os.path.exists("/etc/userdomains"):  # cPanel: "domain: user"
-        return [l.split(":", 1)[0].strip() for l in open("/etc/userdomains") if ":" in l and not l.startswith("*")]
-    if os.path.isdir("/etc/virtual"):  # DirectAdmin
-        return [d for d in os.listdir("/etc/virtual")
-                if d not in ("default", "majordomo") and os.path.isfile(f"/etc/virtual/{d}/domains")]
-    out = run(["cyberpanel", "listWebsitesJson"])
-    if out:
-        try:
-            return [s.get("domain") or s.get("domainName") for s in json.loads(out) if s]
-        except ValueError:
-            pass
-    sys.exit("could not detect the panel; use --all or --from-file")
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from seconddns_common import api, load_config, panel_zones, zones_from_file, canonical_targets  # noqa: E402
 
 
 def main():
@@ -111,7 +36,7 @@ def main():
     if not my:
         sys.exit("master_ip missing: set it in the config or pass --master-ip")
 
-    code, zones = api(cfg, "GET", "/api/zones")
+    code, zones = api(cfg, "GET", "/api/zones", ua="SecondDNS-MigrateMaster/1.0")
     if code != 200 or not isinstance(zones, list):
         sys.exit(f"GET /api/zones failed: HTTP {code} {zones.get('error', '') if isinstance(zones, dict) else ''}")
     by_name = {z["name"]: z for z in zones}
@@ -120,16 +45,8 @@ def main():
     if a.all:
         targets = sorted(by_name)
     else:
-        raw = [l.strip() for l in open(a.from_file)] if a.from_file else panel_domains()
-        targets = []
-        for name in raw:
-            if not name:
-                continue
-            canon, why = canonical(name)
-            if canon is None:
-                skipped.append((name, why))
-            elif canon not in targets:
-                targets.append(canon)
+        raw = zones_from_file(a.from_file) if a.from_file else panel_zones()
+        targets, skipped = canonical_targets(raw)
 
     to_change, already, absent = [], [], []
     for name in targets:
@@ -147,7 +64,7 @@ def main():
     for z in to_change:
         line = f"  {z['name']}: {z.get('masterIp')} -> {my}"
         if a.apply:
-            code, resp = api(cfg, "PATCH", f"/api/zones/{z['id']}", {"masterIp": my})
+            code, resp = api(cfg, "PATCH", f"/api/zones/{z['id']}", {"masterIp": my}, ua="SecondDNS-MigrateMaster/1.0")
             if code == 200:
                 print(line + "  [changed]")
             else:
