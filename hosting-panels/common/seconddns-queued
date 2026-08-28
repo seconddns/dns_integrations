@@ -118,16 +118,34 @@ def wake_socket():
 
 
 def wait_for_wakeup(sk, timeout):
-    """Sleep until a wakeup datagram arrives or the fallback tick fires."""
+    """Sleep until a wakeup datagram arrives or the fallback tick fires.
+    Returns True when woken by a datagram."""
     sk.settimeout(timeout)
+    woken = False
     try:
         sk.recv(16)
+        woken = True
         # absorb any burst of wakeups queued while we were busy
         sk.settimeout(0)
         while True:
             sk.recv(16)
     except (socket.timeout, BlockingIOError, InterruptedError, OSError):
         pass
+    return woken
+
+
+def send_wakeup():
+    """Client side of the wakeup socket (used by --once when the daemon holds the lock)."""
+    cwd = os.getcwd()
+    try:
+        os.chdir(os.path.dirname(SOCK) or ".")
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.sendto(b"1", os.path.basename(SOCK))
+        return True
+    except OSError:
+        return False
+    finally:
+        os.chdir(cwd)
 
 
 def db():
@@ -230,7 +248,7 @@ def send_op(cfg, op, domain, master_ip):
     return FAILED, f"unknown op {op}"
 
 
-def drain(cfg, conn, once):
+def drain(cfg, conn, once, sk=None):
     """Process pending ops in FIFO order.
 
     Returns True when the queue is empty, False when delivery must pause
@@ -269,9 +287,16 @@ def drain(cfg, conn, once):
                 f" {pending} op(s) waiting, retry in {backoff}s")
             if once:
                 return False
+            # a new enqueue (or a flush) cuts the wait short: retry right away
             deadline = time.time() + backoff
-            while running and time.time() < deadline:
-                time.sleep(1)
+            woken = False
+            while running and not woken and time.time() < deadline:
+                if sk is not None:
+                    woken = wait_for_wakeup(sk, min(1, max(0, deadline - time.time())))
+                else:
+                    time.sleep(1)
+            if woken:
+                log("[~] worker: woken up, retrying now")
             backoff = min(backoff * 2, cfg["backoff_max"])
     return False
 
@@ -290,8 +315,12 @@ def main():
     if once:
         fd = queue_lock(block=False)
         if fd is None:
-            log("[~] worker: another drainer holds the queue lock, nothing to do")
-            print("queue is being drained by another process")
+            if send_wakeup():
+                log("[~] worker: another drainer holds the queue lock, sent it a wakeup")
+                print("queue is being drained by another process; asked it to retry now")
+            else:
+                log("[~] worker: another drainer holds the queue lock, nothing to do")
+                print("queue is being drained by another process")
             sys.exit(0)
         sys.exit(0 if drain(cfg, conn, once=True) else 1)
 
@@ -300,7 +329,7 @@ def main():
     while running:
         fd = queue_lock(block=True)
         try:
-            drain(cfg, conn, once=False)
+            drain(cfg, conn, once=False, sk=sk)
         finally:
             os.close(fd)
         wait_for_wakeup(sk, cfg["poll_interval"])
