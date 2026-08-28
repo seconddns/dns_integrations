@@ -45,7 +45,7 @@ For best results, IDN domains should be converted to Punycode format (e.g. `xn--
 ## Installation
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_API_KEY
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_API_KEY
 ```
 
 The installer:
@@ -181,7 +181,7 @@ NEW_DOMAIN_NAME=каба-жаба.укр bash -c /usr/local/bin/seconddns-plesk-
 ## Uninstall
 
 ```bash
-curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/uninstall.sh | bash
+curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/plesk/uninstall.sh | bash
 ```
 
 Removes event handlers, scripts, and config. Zones on the secondary are not deleted automatically.

@@ -6,14 +6,14 @@ set -e
 
 # SecondDNS cPanel/WHM Integration Installer
 # Usage:
-#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
+#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes] [--ref=BRANCH]
 #   curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel/install.sh | bash -s -- --api-key=YOUR_KEY
 
 CONFIG_FILE="/etc/seconddns.conf"
 LOG_FILE="/var/log/seconddns.log"
 SCRIPT_DIR="/usr/local/bin"
 HOOKS_BIN="/usr/local/cpanel/bin/manage_hooks"
-REPO_URL="https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cpanel"
+REF="main"  # git ref (branch/tag) to install from; --ref=develop for pre-release testing
 
 API_KEY=""
 API_URL="https://seconddns.com"
@@ -23,6 +23,7 @@ AUTO_YES=0
 for arg in "$@"; do
     case $arg in
         --api-key=*) API_KEY="${arg#*=}" ;;
+        --ref=*) REF="${arg#*=}" ;;
         --api-url=*) API_URL="${arg#*=}" ;;
         --master-ip=*) MASTER_IP="${arg#*=}" ;;
         --yes|-y) AUTO_YES=1 ;;
@@ -37,6 +38,7 @@ for arg in "$@"; do
             ;;
     esac
 done
+REPO_URL="https://raw.githubusercontent.com/seconddns/dns_integrations/$REF/hosting-panels/cpanel"
 
 if [ -z "$API_KEY" ]; then
     echo "Error: --api-key is required"
