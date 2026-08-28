@@ -37,6 +37,13 @@ seconddns-migrate-master --from-file domains.txt --apply
 seconddns-migrate-master --master-ip 203.0.113.5 --apply   # overrides the config
 ```
 
+`[changed]` means SecondDNS accepted the new master: the zone goes to
+`pending` and is pulled from the new server asynchronously. Check the
+result per zone in the dashboard or with
+`curl -H "X-API-Key: …" https://seconddns.com/api/zones/by-name/<name>` —
+`status: synced` and an empty `lastError` mean the transfer from the new
+master worked.
+
 The domain list comes from the panel (Plesk, cPanel, DirectAdmin, CyberPanel)
 and goes through the same name canonicalisation as the hooks, so IDN names
 match their Punycode zones. Zones not hosted on this panel are left alone
@@ -50,6 +57,10 @@ unless you pass `--all`.
 3. On the new server: `seconddns-migrate-master` (check the table), then
    `seconddns-migrate-master --apply`. Confirm with `seconddns-queue status`
    and in the dashboard that the zones show `synced` with the new master.
+   A domain created on the new panel while its zone still points at the
+   old master is not re-pointed automatically: the hook's create gets a
+   409, the worker logs `exists, mastered by <old ip> — run
+   seconddns-migrate-master`, and the queue moves on.
 4. Make sure the old server runs hooks with the master check (any version
    that ships `seconddns-owner`), then delete the domains there. Each delete
    is skipped with a log line because the zone is now mastered by the new
