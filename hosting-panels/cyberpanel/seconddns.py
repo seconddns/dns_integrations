@@ -145,10 +145,13 @@ def list_zones(config):
 
 
 def add_zone(config, domain):
+    raw = domain
     domain, reason = canonical_domain(domain)
     if reason:
         logger.error("[!] Zone refused: %s", reason)
         return False
+    if domain != raw:
+        logger.info("    zone name received as %r", raw)
     if not config or not config.get("master_ip"):
         return False
     logger.info("[+] Adding zone: %s (master: %s)", domain, config["master_ip"])
@@ -163,10 +166,13 @@ def find_zone_by_name(config, domain):
 
 
 def remove_zone(config, domain):
+    raw = domain
     domain, reason = canonical_domain(domain)
     if reason:
         logger.error("[!] Zone refused: %s", reason)
         return False
+    if domain != raw:
+        logger.info("    zone name received as %r", raw)
     logger.info("[-] Removing zone: %s", domain)
     return queue_op("delete", domain)
 
