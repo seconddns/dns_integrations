@@ -170,7 +170,15 @@ before=$(pending)
 assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
     "mixed.case.example.com" "domain lowercased and root dot stripped"
 
-for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" ""; do
+"$QUEUE" enqueue create "ПРИКЛАД.УКР" 192.0.2.10
+assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
+    "xn--80aikifvh.xn--j1amh" "non-latin name converted to punycode"
+
+# valid_domain answers on its own, without assuming normalize_domain ran
+( SECONDDNS_QUEUE_LIB=1 . "$QUEUE"; valid_domain "Example.COM" ) && ok "valid_domain is case-insensitive" \
+    || fail "valid_domain is case-insensitive"
+
+for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" "" "приклад..укр"; do
     rc=0; "$QUEUE" enqueue create "$bad" 192.0.2.10 || rc=$?
     assert_eq "$rc" 2 "rejected invalid domain '$bad'"
 done
@@ -179,7 +187,7 @@ rc=0; "$QUEUE" enqueue create valid.example.com "999.1.1.1" || rc=$?
 assert_eq "$rc" 2 "rejected invalid master_ip"
 rc=0; "$QUEUE" enqueue purge valid.example.com 192.0.2.10 || rc=$?
 assert_eq "$rc" 2 "rejected unknown op"
-assert_eq "$(( $(pending) - before ))" 1 "only the valid op reached the queue"
+assert_eq "$(( $(pending) - before ))" 2 "only the valid ops reached the queue"
 echo ok > "$TMP/mode"
 "$QUEUE" flush >/dev/null
 
