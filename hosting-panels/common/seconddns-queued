@@ -181,7 +181,10 @@ def send_op(cfg, op, domain, master_ip):
             return DONE, code
         if code in (400, 422):
             return FAILED, code
-        if code != 200 or not zone.get("id"):
+        if code == 200 and not zone.get("id"):
+            log(f"[!] worker: zone {domain} lookup returned 200 without id")
+            return FAILED, code
+        if code != 200:
             return RETRY, code
         code, _ = api(cfg, "DELETE", f"/api/zones/{zone['id']}")
         if code in (200, 204, 404):

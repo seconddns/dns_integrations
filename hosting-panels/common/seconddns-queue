@@ -67,12 +67,13 @@ cmd_enqueue() {
     }
     log "[>] queue: enqueued $op $domain"
     # wake the delivery worker instantly (best-effort)
-    python3 -c "
-import socket, os
-os.chdir(os.path.dirname('$QSOCK') or '.')  # AF_UNIX ~104-byte path limit
+    python3 -c '
+import socket, os, sys
+sock = sys.argv[1]
+os.chdir(os.path.dirname(sock) or ".")  # AF_UNIX ~104-byte path limit
 s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-s.sendto(b'1', os.path.basename('$QSOCK'))
-" 2>/dev/null || true
+s.sendto(b"1", os.path.basename(sock))
+' "$QSOCK" 2>/dev/null || true
 }
 
 cmd_status() {
