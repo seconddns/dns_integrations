@@ -16,7 +16,11 @@ Exit 0 = nothing failed, 1 = at least one PATCH or lookup failed.
 """
 import argparse
 import os
+import signal
 import sys
+
+# piping into head/grep must not end in a BrokenPipeError traceback
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from seconddns_common import api, load_config, panel_zones, zones_from_file, canonical_targets  # noqa: E402
