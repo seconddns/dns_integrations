@@ -66,10 +66,11 @@ class PanelError(SystemExit):
     pass
 
 
-def _run(cmd, timeout=30):
+def _run(cmd, timeout=30, env=None):
     """stdout of a command, or None when it is missing, fails or hangs."""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str))
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str),
+                           env=env)
         return r.stdout if r.returncode == 0 else None
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -123,7 +124,9 @@ def panel_zones():
         out = None
         if creds and all(creds):
             user, pw, name = creds
-            out = _run(["mysql", "-u", user, f"-p{pw}", name, "-Ne", "SELECT name FROM domains"])
+            # password via the environment, not argv: argv is visible in ps
+            out = _run(["mysql", "-u", user, name, "-Ne", "SELECT name FROM domains"],
+                       env={**os.environ, "MYSQL_PWD": pw})
         source = "CyberPanel PowerDNS domains"
     else:
         raise PanelError("could not detect the panel; use --from-file")
