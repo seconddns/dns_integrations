@@ -220,6 +220,22 @@ with open(p, 'w') as f: f.write(c)
     # Systemd hook
     SYSTEMD_SERVICE="/etc/systemd/system/seconddns-signals.service"
     cp "$CYBER_SRC/seconddns-signals.service" "$SYSTEMD_SERVICE"
+
+# --- Offline operation queue ---
+COMMON_SRC="$WORK_DIR/dns_integrations/hosting-panels/common"
+cp "$COMMON_SRC/seconddns-domain" /usr/local/bin/seconddns-domain
+cp "$COMMON_SRC/seconddns-queue" /usr/local/bin/seconddns-queue
+cp "$COMMON_SRC/seconddns-queued" /usr/local/bin/seconddns-queued
+cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.service
+chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+bash "$COMMON_SRC/install-idn2.sh"
+mkdir -p /var/lib/seconddns
+if ! command -v sqlite3 &>/dev/null; then
+    echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
+fi
+systemctl daemon-reload
+systemctl enable --now seconddns-queued.service
+echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
     systemctl daemon-reload
     systemctl enable seconddns-signals.service 2>/dev/null
     echo "[+] Systemd hook installed (survives CyberPanel updates)"

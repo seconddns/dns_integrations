@@ -27,57 +27,27 @@ NEW_ZONE="${NEW_DOMAIN_ALIAS_NAME:-$NEW_DOMAIN_NAME}"
 # Not a rename — domain_update fires for all changes, not only renames
 [ "$OLD_ZONE" = "$NEW_ZONE" ] && exit 0
 
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+for var in OLD_ZONE NEW_ZONE; do
+    if ! canonical_domain "${!var}"; then
+        log "[!] Zone '${!var}' refused: $DOMAIN_ERROR (plesk event handler)"
+        exit 0
+    fi
+    printf -v "$var" '%s' "$DOMAIN"
+done
+
 log "Zone rename: $OLD_ZONE -> $NEW_ZONE (plesk event handler)"
 
-idn_encode() {
-    local name="$1"
-    if command -v idn2 &>/dev/null; then
-        idn2 --quiet "$name" 2>/dev/null || echo "$name"
-    elif command -v idn &>/dev/null; then
-        idn --quiet "$name" 2>/dev/null || echo "$name"
-    else
-        echo "$name"
-    fi
-}
-
-OLD_ZONE=$(idn_encode "$OLD_ZONE")
-NEW_ZONE=$(idn_encode "$NEW_ZONE")
-
-# Delete old zone
-zone_id=$(curl -sf --max-time 10 \
-    -H "X-API-Key: $API_KEY" \
-    -H "User-Agent: SecondDNS-Plesk/1.0" \
-    "$API_URL/api/zones/by-name/$OLD_ZONE" 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
-
-if [ -n "$zone_id" ]; then
-    curl -sf --max-time 15 \
-        -X DELETE \
-        -H "X-API-Key: $API_KEY" \
-        -H "User-Agent: SecondDNS-Plesk/1.0" \
-        "$API_URL/api/zones/$zone_id" 2>/dev/null
-    if [ $? -eq 0 ]; then
-        log "[+] Old zone $OLD_ZONE removed from SecondDNS"
-    else
-        log "[!] Failed to remove old zone $OLD_ZONE from SecondDNS"
-    fi
+QUEUE="/usr/local/bin/seconddns-queue"
+rc=0
+"$QUEUE" enqueue delete "$OLD_ZONE" || rc=1
+"$QUEUE" enqueue create "$NEW_ZONE" "$MASTER_IP" || rc=1
+if [ $rc -eq 0 ]; then
+    log "[>] Zone rename $OLD_ZONE -> $NEW_ZONE queued for SecondDNS"
 else
-    log "[~] Old zone $OLD_ZONE not found in SecondDNS (skipping delete)"
-fi
-
-# Create new zone
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-Plesk/1.0" \
-    -d "{\"name\":\"$NEW_ZONE\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] New zone $NEW_ZONE added to SecondDNS"
-else
-    log "[!] Failed to add new zone $NEW_ZONE to SecondDNS"
+    log "[!] Zone rename $OLD_ZONE -> $NEW_ZONE NOT fully queued (seconddns-queue failed)"
 fi
 
 exit 0

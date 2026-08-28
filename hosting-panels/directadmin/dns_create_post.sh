@@ -26,21 +26,21 @@ case "$caller" in
     *) exit 0 ;;
 esac
 
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+if ! canonical_domain "$domain"; then
+    log "[!] Zone '$domain' refused: $DOMAIN_ERROR (directadmin hook)"
+    exit 0
+fi
+domain="$DOMAIN"
 log "Zone created: $domain (caller=$caller, user=$username)"
 
-# Add zone to SecondDNS
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-DirectAdmin/1.0" \
-    -d "{\"name\":\"$domain\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] Zone $domain added to SecondDNS"
+QUEUE="/usr/local/bin/seconddns-queue"
+if "$QUEUE" enqueue create "$domain" "$MASTER_IP"; then
+    log "[>] Zone $domain queued for SecondDNS"
 else
-    log "[!] Failed to add zone $domain to SecondDNS"
+    log "[!] Zone $domain NOT queued (seconddns-queue failed)"
 fi
 
 exit 0

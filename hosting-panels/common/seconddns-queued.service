@@ -1,0 +1,21 @@
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# SecondDNS offline queue delivery worker
+[Unit]
+Description=SecondDNS offline queue delivery worker
+Documentation=https://github.com/seconddns/dns_integrations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/seconddns-queued
+Restart=always
+RestartSec=5
+User=root
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/seconddns /var/log
+
+[Install]
+WantedBy=multi-user.target

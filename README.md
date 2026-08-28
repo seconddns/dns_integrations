@@ -48,6 +48,53 @@ curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosti
 
 See the README in each directory for options, AXFR configuration, and troubleshooting.
 
+### Offline operation queue
+
+Every panel integration ships with a local offline queue
+([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
+Every hook first passes the zone name through
+[`seconddns-domain`](hosting-panels/common/seconddns-domain) (lowercase, IDNA2008
+Punycode via `idn2`, LDH check); a name that fails is logged with the reason and
+never enqueued.
+Panel hooks enqueue zone operations into a SQLite database
+(`/var/lib/seconddns/queue.db`); the `seconddns-queued` systemd worker is the
+single delivery path — after every enqueue the hook pokes the worker through a
+unix datagram socket (`/var/lib/seconddns/queued.sock`), so delivery starts
+instantly with no polling; a rare fallback tick (`poll_interval`, 60 s) only
+guards against lost wakeups. Operations are delivered in strict FIFO order. If the SecondDNS API is unreachable (outage or maintenance), the
+worker backs off exponentially and retries until everything is delivered.
+Nothing your customers do in the panel during a SecondDNS downtime is lost,
+and hooks never block on API timeouts (they only do a local INSERT).
+
+Worker settings (optional `[queue]` section in `/etc/seconddns.conf`):
+
+```ini
+[queue]
+poll_interval = 60     # fallback idle tick (wakeups are socket-driven)
+http_timeout = 15      # seconds per API request
+backoff_min = 30       # first retry delay when the API is down
+backoff_max = 300      # retry delay ceiling
+```
+
+Replay semantics:
+
+- retryable errors (timeout, 5xx, redirects, non-JSON answers from a proxy or maintenance page, 401/403) pause delivery; the worker retries with exponential backoff
+- duplicate delivery is safe: `409` on create and `404` on delete count as success
+- hard errors (`400`/`422`) mark the operation `failed` and the drain continues
+
+Inspect the queue on any panel server:
+
+```bash
+seconddns-queue status              # pending / failed / oldest age / last error (exit 0/1/2)
+seconddns-queue status --json       # same as JSON (for monitoring agents)
+seconddns-queue flush               # manual one-shot drain (diagnostics)
+seconddns-queue retry <id|--all>    # requeue failed operations
+seconddns-queue drop <id|--all>     # discard failed operations
+systemctl status seconddns-queued   # delivery worker
+```
+
+Requires `sqlite3` and `python3` (both present by default on all supported panels).
+
 ---
 
 ## Monitoring
@@ -55,7 +102,9 @@ See the README in each directory for options, AXFR configuration, and troublesho
 | Tool | Type | What it checks |
 |:-----|:-----|:---------------|
 | [Nagios / Icinga](nagios_plugins/) | Check plugin (bash) | Zone sync status, stale zones, master reachability |
+| [Nagios / Icinga](nagios_plugins/check_seconddns_queue.sh) | Check plugin (bash) | Offline queue backlog on a panel server (`-w`/`-c` age thresholds) |
 | [Zabbix](zabbix_templates/) | HTTP Agent template | Zone counters, triggers, graphs — no agent required |
+| [Zabbix](zabbix_templates/seconddns_queue.yaml) | Agent template | Offline queue backlog on a panel server (needs a `UserParameter`) |
 
 Both integrations use the SecondDNS API key. See the README in each directory for installation and configuration.
 
