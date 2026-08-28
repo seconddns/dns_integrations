@@ -16,6 +16,7 @@ canonical_domain() {
     local d ascii label
     DOMAIN="" DOMAIN_ERROR=""
     d=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    d="${d%.}"  # canonical FQDN form; one dot only, "a.b.." stays an empty label
 
     case "$d" in
         "") DOMAIN_ERROR="empty name"; return 1 ;;

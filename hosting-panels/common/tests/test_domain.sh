@@ -24,6 +24,8 @@ xn--e1afmkfd.xn--p1ai|xn--e1afmkfd.xn--p1ai
 日本.jp|xn--wgv71a.jp
 a-b.example.com|a-b.example.com
 1.2.3.4.in-addr.arpa|1.2.3.4.in-addr.arpa
+example.com.|example.com
+Example.COM.|example.com
 EOF
 
 echo "== refused, with a reason"
@@ -33,7 +35,7 @@ while IFS='|' read -r in want; do
 done <<'EOF'
 |empty name
 tld|no dot
-example.com.|empty label
+example.com..|empty label
 .example.com|empty label
 a..b|empty label
 under_score.example.com|outside a-z 0-9 -

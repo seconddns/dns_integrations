@@ -50,22 +50,27 @@ if [ -z "$json" ]; then
   exit 3
 fi
 
-pending=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin)['pending'])")
-failed=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin)['failed'])")
-oldest=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin)['oldest_age_seconds'])")
+read -r pending failed oldest <<< "$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['pending'], d['failed'], d['oldest_age_seconds'])")"
+last_error=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('last_error',''))")
 
 perfdata="pending=$pending failed=$failed oldest_age=${oldest}s;$((WARN_MIN*60));$((CRIT_MIN*60))"
+# same thresholds and exit codes; the text tells "service down" from "key revoked"
+note=""
+case "$last_error" in
+  *"auth rejected"*) note=" - auth rejected, retrying" ;;
+  ?*) note=" - $last_error" ;;
+esac
 
 if [ "$oldest" -ge $((CRIT_MIN*60)) ]; then
-  echo "CRITICAL - oldest queued op is $((oldest/60)) min old ($pending pending, $failed failed) | $perfdata"
+  echo "CRITICAL - oldest queued op is $((oldest/60)) min old ($pending pending, $failed failed)$note | $perfdata"
   exit 2
 fi
 if [ "$oldest" -ge $((WARN_MIN*60)) ] || [ "$failed" -gt 0 ]; then
-  echo "WARNING - $pending pending (oldest $((oldest/60)) min), $failed failed | $perfdata"
+  echo "WARNING - $pending pending (oldest $((oldest/60)) min), $failed failed$note | $perfdata"
   exit 1
 fi
 if [ "$pending" -gt 0 ]; then
-  echo "OK - $pending op(s) queued, draining | $perfdata"
+  echo "OK - $pending op(s) queued, draining$note | $perfdata"
 else
   echo "OK - queue empty | $perfdata"
 fi

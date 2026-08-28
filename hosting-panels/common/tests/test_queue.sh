@@ -65,8 +65,19 @@ class H(http.server.BaseHTTPRequestHandler):
     def record(self):
         with open(tmp+'/requests.log','a') as f:
             f.write(f"{self.command} {self.path.split('?')[0]}\n")
+    def special(self):
+        m=self.mode()
+        if m=='redirect':
+            self.send_response(302); self.send_header('Location','/maintenance'); self.end_headers(); return True
+        if m=='html':
+            self.send_response(200); self.send_header('Content-Type','text/html'); self.end_headers()
+            self.wfile.write(b'<html><body>We are down for maintenance</body></html>'); return True
+        if m=='auth':
+            self.reply(401, b'{"error":"invalid api key"}'); return True
+        return False
     def do_POST(self):
         self.rfile.read(int(self.headers.get('Content-Length',0)))
+        if self.special(): return
         m=self.mode()
         if m in ('ok','record'):
             if m=='record': self.record()
@@ -75,6 +86,7 @@ class H(http.server.BaseHTTPRequestHandler):
         elif m=='badreq': self.reply(400, b'{"error":"invalid"}')
         else: self.reply(503)
     def do_GET(self):
+        if self.special(): return
         m=self.mode()
         if m in ('ok','record'):
             if m=='record': self.record()
@@ -83,6 +95,7 @@ class H(http.server.BaseHTTPRequestHandler):
         elif m=='noid': self.reply(200, b'{}')
         else: self.reply(503)
     def do_DELETE(self):
+        if self.special(): return
         m=self.mode()
         if m in ('ok','record'):
             if m=='record': self.record()
@@ -182,6 +195,92 @@ echo noid > "$TMP/mode"
 assert_eq "$(failed)" 1 "200-without-id marked failed"
 assert_eq "$(pending)" 0 "queue not wedged behind it"
 sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+
+head_err() { sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT IFNULL(last_error,'') FROM ops WHERE status='pending' ORDER BY id LIMIT 1;"; }
+head_att() { sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT attempts FROM ops WHERE status='pending' ORDER BY id LIMIT 1;"; }
+
+echo "== 11. maintenance redirect (302): worker survives, op waits"
+echo redirect > "$TMP/mode"
+"$QUEUE" enqueue create maint.example.com 192.0.2.10
+"$QUEUE" flush; rc=$?
+assert_eq "$rc" 1 "flush reports API down"
+assert_eq "$(pending)" 1 "op still pending"
+assert_eq "$(head_att)" 1 "attempt counted"
+[[ "$(head_err)" == *"HTTP 302"* ]] && ok "last_error records the redirect" || fail "last_error ($(head_err))"
+
+echo "== 12. HTML with 200: not our API, op waits"
+echo html > "$TMP/mode"
+"$QUEUE" flush; rc=$?
+assert_eq "$rc" 1 "flush reports API down"
+assert_eq "$(pending)" 1 "op still pending"
+assert_eq "$(head_att)" 2 "attempt counted"
+[[ "$(head_err)" == *"non-JSON"* ]] && ok "last_error names the non-JSON body" || fail "last_error ($(head_err))"
+grep -q "Traceback" "$SECONDDNS_LOG" && fail "traceback in log" || ok "no traceback"
+
+echo "== 13. 401: retry, reported as auth rejected"
+echo auth > "$TMP/mode"
+"$QUEUE" flush; rc=$?
+assert_eq "$rc" 1 "401 is retryable"
+assert_eq "$(pending)" 1 "op still pending"
+assert_eq "$(head_err)" "HTTP 401 auth rejected" "last_error text"
+grep -q "API key rejected" "$SECONDDNS_LOG" && ok "log says key rejected, not API unavailable" || fail "log wording"
+"$QUEUE" status --json | python3 -c "import sys,json; assert 'auth rejected' in json.load(sys.stdin)['last_error']" \
+    && ok "status --json carries last_error" || fail "status --json last_error"
+echo ok > "$TMP/mode"
+"$QUEUE" flush >/dev/null
+assert_eq "$(pending)" 0 "delivered once the key works"
+
+echo "== 14. retry / drop failed ops"
+echo badreq > "$TMP/mode"
+"$QUEUE" enqueue create r1.example.com 192.0.2.10
+"$QUEUE" enqueue create r2.example.com 192.0.2.10
+"$QUEUE" flush >/dev/null
+assert_eq "$(failed)" 2 "two failed"
+id1=$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT MIN(id) FROM ops WHERE status='failed';")
+"$QUEUE" retry "$id1" >/dev/null
+assert_eq "$(pending)" 1 "retry <id> requeues one"
+"$QUEUE" retry --all >/dev/null
+assert_eq "$(failed)" 0 "retry --all requeues the rest"
+"$QUEUE" flush >/dev/null
+assert_eq "$(failed)" 2 "still rejected by the API"
+"$QUEUE" drop "$id1" >/dev/null
+assert_eq "$(failed)" 1 "drop <id> removes one"
+"$QUEUE" drop --all >/dev/null
+assert_eq "$(failed)" 0 "drop --all removes the rest"
+rc=0; "$QUEUE" retry abc >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 1 "retry with a bad id is refused"
+
+echo "== 15. concurrent drainers keep FIFO"
+# two flushes at once, no daemon: the lock lets only one drain
+echo record > "$TMP/mode"; : > "$TMP/requests.log"
+"$QUEUE" enqueue create fifo.example.com 192.0.2.10
+"$QUEUE" enqueue delete fifo.example.com
+"$QUEUE" flush >/dev/null & p1=$!
+"$QUEUE" flush >/dev/null & p2=$!
+wait $p1 $p2
+assert_eq "$(pending)" 0 "drained"
+assert_eq "$(sed -n 1p "$TMP/requests.log")" "POST /api/zones" "create first"
+assert_eq "$(sed -n 2p "$TMP/requests.log")" "GET /api/zones/by-name/fifo.example.com" "delete second"
+# daemon holding the lock during an outage: flush does not sneak in
+echo down > "$TMP/mode"; : > "$TMP/requests.log"
+"$QUEUE" enqueue create fifo2.example.com 192.0.2.10
+"$QUEUE" enqueue delete fifo2.example.com
+"$WORKER" & DPID=$!
+sleep 1
+out=$("$QUEUE" flush 2>&1); rc=$?
+assert_eq "$rc" 0 "flush yields to the running worker"
+[[ "$out" == *"another process"* ]] && ok "flush says so" || fail "flush output: $out"
+echo record > "$TMP/mode"
+for i in $(seq 1 15); do [ "$(pending)" = 0 ] && break; sleep 1; done
+assert_eq "$(pending)" 0 "daemon drained after recovery"
+assert_eq "$(sed -n 1p "$TMP/requests.log")" "POST /api/zones" "create first"
+assert_eq "$(sed -n 2p "$TMP/requests.log")" "GET /api/zones/by-name/fifo2.example.com" "delete second"
+kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+
+echo "== 16. wakeup failure is logged, not hidden"
+SECONDDNS_QUEUE_SOCK="$TMP/absent.sock" "$QUEUE" enqueue create wake.example.com 192.0.2.10
+grep -q "wakeup failed, worker will pick it up within 1s" "$SECONDDNS_LOG" && ok "wakeup failure logged with poll interval" || fail "wakeup log line"
+echo ok > "$TMP/mode"; "$QUEUE" flush >/dev/null
 
 echo
 echo "passed: $PASS, failed: $FAIL"
