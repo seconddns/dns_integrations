@@ -93,7 +93,8 @@ class H(http.server.BaseHTTPRequestHandler):
             self.reply(200, json.dumps([
                 {"id":"a","name":"mine.example.com","masterIp":"192.0.2.10"},
                 {"id":"b","name":"old.example.com","masterIp":"192.0.2.99"},
-                {"id":"c","name":"other.example.com","masterIp":"192.0.2.99"}]).encode()); return
+                {"id":"c","name":"other.example.com","masterIp":"192.0.2.99"},
+                {"id":"d","name":"gone.example.com","masterIp":"192.0.2.10"}]).encode()); return
         if m in ('ok','record'):
             if m=='record': self.record()
             self.reply(200, b'{"id":"z1","masterIp":"192.0.2.10"}')
@@ -390,7 +391,26 @@ assert_eq "$(grep -c PATCH "$TMP/requests.log")" 2 "--master-ip overrides config
 "$MIG" --all --apply >/dev/null
 assert_eq "$(grep -c PATCH "$TMP/requests.log")" 2 "--all reaches zones not on this panel"
 grep -q "PATCH /api/zones/c" "$TMP/requests.log" && ok "other.example.com included with --all" || fail "--all missed c"
-unset SECONDDNS_DOMAIN_BIN
+
+echo "== 21. seconddns-reconcile"
+REC="$HERE/../seconddns-reconcile"; export SECONDDNS_QUEUE_BIN="$QUEUE"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+echo ok > "$TMP/mode"
+out=$("$REC" --from-file "$TMP/domains.txt"); rc=$?
+assert_eq "$rc" 0 "report exits 0"
+[[ "$out" == *"ok: 1   missing: 1   stale: 2 (1 mine, 1 mastered elsewhere)   master mismatch: 1"* ]] && ok "report counts" || fail "report: $out"
+[[ "$out" == *"mismatch: old.example.com  mastered by 192.0.2.99"* ]] && ok "mismatch points at migrate-master" || fail "mismatch line"
+out=$("$REC" --from-file "$TMP/domains.txt" --add-missing --remove-stale)
+assert_eq "$(pending)" 0 "dry run queues nothing"
+[[ "$out" == *"[DRY RUN] create missing.example.com"* && "$out" == *"[DRY RUN] delete gone.example.com"* ]] && ok "dry run lists both operations" || fail "dry run: $out"
+[[ "$out" == *"delete other.example.com  [skipped: mastered by 192.0.2.99]"* ]] && ok "foreign stale skipped in dry run" || fail "foreign stale: $out"
+"$REC" --from-file "$TMP/domains.txt" --add-missing --apply >/dev/null
+assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT op||' '||domain||' '||IFNULL(master_ip,'') FROM ops;")" "create missing.example.com 192.0.2.10" "--add-missing --apply queues the create"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+"$REC" --from-file "$TMP/domains.txt" --remove-stale --apply >/dev/null
+assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT op||' '||domain||' '||IFNULL(master_ip,'') FROM ops;")" "delete gone.example.com 192.0.2.10" "--remove-stale --apply queues only the own-master stale"
+sqlite3 "$SECONDDNS_QUEUE_DB" "DELETE FROM ops;"
+unset SECONDDNS_QUEUE_BIN SECONDDNS_DOMAIN_BIN
 
 echo
 echo "passed: $PASS, failed: $FAIL"

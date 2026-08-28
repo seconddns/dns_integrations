@@ -281,7 +281,10 @@ def drain(cfg, conn, once, sk=None):
         if result == DONE:
             conn.execute("DELETE FROM ops WHERE id=?", (rid,))
             conn.commit()
-            log(f"[+] worker: delivered {op} {domain}")
+            if why.startswith("skipped"):
+                log(f"[~] worker: completed {op} {domain} ({why})")
+            else:
+                log(f"[+] worker: delivered {op} {domain}")
             backoff = cfg["backoff_min"]
         elif result == FAILED:
             conn.execute(
