@@ -12,7 +12,7 @@ Monitors DNS zone health via the SecondDNS API. Polls every 5 minutes, extracts 
 ### 1. Download
 
 ```bash
-curl -O https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/zabbix_templates/seconddns_health.yaml
+curl -O https://raw.githubusercontent.com/seconddns/dns_integrations/main/zabbix_templates/seconddns_health.yaml
 ```
 
 ### 2. Import
