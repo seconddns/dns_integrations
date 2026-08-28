@@ -6,8 +6,8 @@ set -e
 
 # SecondDNS CyberPanel Integration Installer
 # Usage:
-#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
-#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
+#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes] [--ref=BRANCH]
+#   curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/cyberpanel/install.sh | bash -s -- --api-key=YOUR_KEY
 
 INSTALL_DIR="/usr/local/bin"
 CONFIG_FILE="/etc/seconddns.conf"
@@ -24,9 +24,11 @@ MASTER_IP=""
 AUTO_YES=0
 
 # Parse arguments
+REF="main"  # git ref (branch/tag) to install from; --ref=develop for pre-release testing
 for arg in "$@"; do
     case $arg in
         --api-key=*) API_KEY="${arg#*=}" ;;
+        --ref=*) REF="${arg#*=}" ;;
         --api-url=*) API_URL="${arg#*=}" ;;
         --master-ip=*) MASTER_IP="${arg#*=}" ;;
         --yes|-y) AUTO_YES=1 ;;
@@ -51,7 +53,7 @@ if [ -z "$API_KEY" ]; then
 fi
 
 # Clone repo to temp dir for fresh files
-REPO_URL="https://github.com/0kaba0hub/dns_integrations.git"
+REPO_URL="https://github.com/seconddns/dns_integrations.git"
 WORK_DIR=$(mktemp -d)
 CYBER_SRC="$WORK_DIR/dns_integrations/cyberpanel"
 
@@ -60,7 +62,7 @@ if [ -f "seconddns.py" ]; then
     CYBER_SRC="$(cd "$(dirname "$0")" && pwd)"
 else
     echo "[*] Downloading latest version..."
-    git clone --depth 1 -q "$REPO_URL" "$WORK_DIR/dns_integrations" || {
+    git clone --depth 1 -q --branch "$REF" "$REPO_URL" "$WORK_DIR/dns_integrations" || {
         echo "[!] Failed to clone repository"
         exit 1
     }
