@@ -166,9 +166,9 @@ kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
 
 echo "== 9. input validation and normalization"
 before=$(pending)
-"$QUEUE" enqueue create "Mixed.CASE.example.COM." 192.0.2.10
+"$QUEUE" enqueue create "Mixed.CASE.example.COM" 192.0.2.10
 assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
-    "mixed.case.example.com" "domain lowercased and root dot stripped"
+    "mixed.case.example.com" "domain lowercased"
 
 "$QUEUE" enqueue create "ПРИКЛАД.УКР" 192.0.2.10
 assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id DESC LIMIT 1;")" \
@@ -178,7 +178,7 @@ assert_eq "$(sqlite3 "$SECONDDNS_QUEUE_DB" "SELECT domain FROM ops ORDER BY id D
 ( SECONDDNS_QUEUE_LIB=1 . "$QUEUE"; valid_domain "Example.COM" ) && ok "valid_domain is case-insensitive" \
     || fail "valid_domain is case-insensitive"
 
-for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" "" "приклад..укр"; do
+for bad in "o'brien.example.com" "under_score.example.com" "-lead.example.com" "trail-.example.com" "no-dot" "" "приклад..укр" " lead.space.com" "trail.dot.com."; do
     rc=0; "$QUEUE" enqueue create "$bad" 192.0.2.10 || rc=$?
     assert_eq "$rc" 2 "rejected invalid domain '$bad'"
 done
