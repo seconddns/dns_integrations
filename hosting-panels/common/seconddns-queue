@@ -58,7 +58,25 @@ normalize_domain() {
     printf '%s' "$d" | tr '[:upper:]' '[:lower:]'
 }
 
+# Non-ASCII names reach us unconverted from some panels (CyberPanel), so the
+# queue converts to Punycode itself; ASCII names pass through untouched.
+to_punycode() {
+    local d="$1"
+    case "$d" in
+        *[!!-~]*) ;;
+        *) printf '%s' "$d"; return 0 ;;
+    esac
+    if command -v idn2 >/dev/null 2>&1; then
+        idn2 --quiet "$d" 2>/dev/null && return 0
+    elif command -v idn >/dev/null 2>&1; then
+        idn --quiet "$d" 2>/dev/null && return 0
+    fi
+    python3 -c 'import sys; print(".".join(l.encode("idna").decode() for l in sys.argv[1].split(".")))' "$d" 2>/dev/null
+}
+
 # LDH per RFC 1035: labels of a-z0-9 and inner hyphens, 1-63 each, 253 total.
+# Case-insensitive so the check stands on its own, without assuming that
+# normalize_domain ran first.
 valid_domain() {
     local d="$1" label
     [ -n "$d" ] || return 1
@@ -70,7 +88,7 @@ valid_domain() {
         [ "${#label}" -le 63 ] || return 1
         case "$label" in
             -*|*-) return 1 ;;
-            *[!a-z0-9-]*) return 1 ;;
+            *[!a-zA-Z0-9-]*) return 1 ;;
         esac
     done
     return 0
@@ -104,7 +122,8 @@ cmd_enqueue() {
         *) log "[!] queue: refused unknown op '$op'"; return 2 ;;
     esac
     domain=$(normalize_domain "$2")
-    if ! valid_domain "$domain"; then
+    domain=$(to_punycode "$domain")
+    if [ -z "$domain" ] || ! valid_domain "$domain"; then
         log "[!] queue: refused invalid domain '$2'"
         return 2
     fi
@@ -142,6 +161,9 @@ cmd_status() {
     [ "$pending" -gt 0 ] && exit 1
     exit 0
 }
+
+# Sourced by the test suite to exercise the helpers directly.
+[ -n "${SECONDDNS_QUEUE_LIB:-}" ] && return 0
 
 case "${1:-}" in
   enqueue)
