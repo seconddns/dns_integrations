@@ -47,15 +47,9 @@ init_db() {
         );" >/dev/null
 }
 
-# Lowercase, strip surrounding whitespace and the trailing root dot.
-# DNS names are case-insensitive; the queue stores one canonical form so
-# duplicate delivery and FIFO ordering compare equal across panels.
+# DNS names are case-insensitive; the queue stores one canonical form.
 normalize_domain() {
-    local d="$1"
-    d="${d#"${d%%[![:space:]]*}"}"
-    d="${d%"${d##*[![:space:]]}"}"
-    d="${d%.}"
-    printf '%s' "$d" | tr '[:upper:]' '[:lower:]'
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 # Non-ASCII names reach us unconverted from some panels (CyberPanel), so the
@@ -81,7 +75,12 @@ valid_domain() {
     local d="$1" label
     [ -n "$d" ] || return 1
     [ "${#d}" -le 253 ] || return 1
-    case "$d" in *.*) ;; *) return 1 ;; esac
+    case "$d" in
+        *.*) ;;
+        *) return 1 ;;
+    esac
+    # word splitting drops a trailing empty field, so check the edges directly
+    case "$d" in .*|*.) return 1 ;; esac
     local IFS='.'
     for label in $d; do
         [ -n "$label" ] || return 1
