@@ -95,6 +95,29 @@ reconcile "already.example.com"
 grep -q "gone.example.com" "$TMP/calls" \
     && fail "a fill removed a zone" || ok "stale zone untouched by a fill"
 
+echo "== a panel with no zones at all"
+echo '[{"name":"already.example.com","masterIp":"192.0.2.10"}]' > "$TMP/zones.json"
+: > "$TMP/calls"; : > "$TMP/out"
+reconcile ""; rc=$?
+[ "$rc" -eq 0 ] && ok "an empty panel is not an error" || fail "exit $rc on an empty panel"
+[ ! -s "$TMP/calls" ] && ok "empty panel queues nothing" || fail "queued: $(cat "$TMP/calls")"
+grep -qi "refus\|error" "$TMP/out" && fail "reported a refusal: $(cat "$TMP/out")" || ok "no refusal reported"
+
+echo "== an empty panel must not become a mass delete"
+: > "$TMP/calls"; : > "$TMP/out"
+env SECONDDNS_CONF="$TMP/seconddns.conf" SECONDDNS_QUEUE_BIN="$TMP/queue" \
+    SECONDDNS_DOMAIN_BIN="$HERE/../seconddns-domain" \
+    SECONDDNS_PANEL_ZONES_CMD="printf '%s\n' " CALLS="$TMP/calls" PYTHONPATH="$HERE/.." \
+    python3 "$HERE/../seconddns-reconcile" --remove-stale --apply > "$TMP/out" 2>&1
+rc=$?
+[ "$rc" -ne 0 ] && ok "--remove-stale refuses on an empty panel" || fail "--remove-stale proceeded"
+grep -q "enqueue delete" "$TMP/calls" && fail "queued a delete" || ok "nothing deleted"
+
+echo "== a panel whose names are all unusable is still an error"
+: > "$TMP/out"
+reconcile "'not a domain' '..'"; rc=$?
+[ "$rc" -ne 0 ] && ok "unusable names refused" || fail "accepted unusable names"
+
 echo "== the DirectAdmin walk is gone"
 grep -q "/etc/virtual" "$HERE/../../directadmin/install.sh" \
     && fail "install.sh still walks /etc/virtual" || ok "no /etc/virtual walk in the installer"
