@@ -87,10 +87,19 @@ def _cyberpanel_db():
     if not m:
         return None
     block = m.group(1)
-    def field(k):
+
+    # CyberPanel writes os.getenv('DB_NAME', 'cyberpanel') here, not a bare
+    # literal; the environment wins when it is set, as it does for Django.
+    def field(k, env):
         f = re.search(r"'%s'\s*:\s*'([^']*)'" % k, block)
-        return f.group(1) if f else None
-    return field("USER"), field("PASSWORD"), field("NAME")
+        if f:
+            return os.environ.get(env) or f.group(1)
+        g = re.search(r"'%s'\s*:\s*os\.getenv\(\s*'([^']*)'\s*(?:,\s*'([^']*)')?\s*\)" % k, block)
+        if g:
+            return os.environ.get(g.group(1)) or g.group(2)
+        return None
+
+    return field("USER", "DB_USER"), field("PASSWORD", "DB_PASSWORD"), field("NAME", "DB_NAME")
 
 
 def panel_zones():
