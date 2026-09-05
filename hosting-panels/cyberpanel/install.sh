@@ -298,9 +298,8 @@ if [ -n "$PDNS_CONF" ]; then
 
     echo "[+] Secondary DNS IP: $DNS_IPS"
 
-    # PowerDNS 5 removed master/slave in favour of primary/secondary, and
-    # refuses to start at all on an unknown setting — writing the wrong name
-    # takes the customer's DNS down rather than leaving it misconfigured.
+    # PowerDNS 5 renamed master to primary and refuses to start on an unknown
+    # setting, so the wrong name takes the customer's DNS down entirely.
     PDNS_MAJOR=$(pdns_server --version 2>&1 | grep -oE "PowerDNS Authoritative Server [0-9]+" | grep -oE "[0-9]+$")
     [ -z "$PDNS_MAJOR" ] && PDNS_MAJOR=$(rpm -q --qf "%{VERSION}" pdns 2>/dev/null | cut -d. -f1)
     [ -z "$PDNS_MAJOR" ] && PDNS_MAJOR=$(dpkg-query -W -f='"'"'${Version}'"'"' pdns-server 2>/dev/null | cut -d. -f1)

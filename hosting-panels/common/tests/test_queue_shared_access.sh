@@ -1,8 +1,6 @@
 #!/bin/bash
-# The queue has two writers: the delivery worker as root, and the panel's hook
-# as the web user. SQLite gives -wal and -shm the mode of the database file, so
-# a database created without group write locks the hook out — and only while
-# the worker holds it open, which is worse than always.
+# Two writers share the queue: the worker as root, the panel's hook as the web
+# user. SQLite gives -wal and -shm the mode of the database file.
 # Run as root: bash hosting-panels/common/tests/test_queue_shared_access.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
