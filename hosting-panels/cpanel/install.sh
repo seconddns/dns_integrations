@@ -520,9 +520,8 @@ if confirm "Sync existing cPanel accounts to secondary DNS now?"; then
 fi
 
 echo ""
-# Initial fill: reconcile already knows where each panel keeps its zone list,
-# so the installer does not carry a fourth copy of that. --add-missing only:
-# zones in SecondDNS that are not on this panel are left untouched here.
+# reconcile already knows where each panel keeps its zone list; --add-missing
+# only, since removing a zone the panel lacks is a separate decision.
 if confirm "Queue existing zones for delivery to secondary DNS now?"; then
     echo "[*] Syncing zones..."
     if /usr/local/bin/seconddns-reconcile --add-missing --apply; then
