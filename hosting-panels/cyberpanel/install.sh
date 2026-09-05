@@ -238,6 +238,23 @@ chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/loc
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 bash "$COMMON_SRC/install-sqlite.sh"
+
+# The signal handler runs inside CyberPanel's web process, which is not root,
+# so the queue and the log must be writable by that user. Without this the hook
+# fires, the enqueue fails, and the zone never leaves the panel.
+PANEL_USER=$(ps -eo user,comm | awk '$2=="lscpd" && $1!="root" {print $1; exit}')
+PANEL_USER=${PANEL_USER:-lscpd}
+if getent passwd "$PANEL_USER" >/dev/null 2>&1; then
+    chgrp -R "$PANEL_USER" /var/lib/seconddns 2>/dev/null
+    chmod 2770 /var/lib/seconddns 2>/dev/null
+    find /var/lib/seconddns -type f -exec chmod 660 {} + 2>/dev/null
+    chgrp "$PANEL_USER" "$LOG_FILE" 2>/dev/null
+    chmod 660 "$LOG_FILE" 2>/dev/null
+    echo "[+] Queue and log writable by $PANEL_USER"
+else
+    echo "[!] Panel user $PANEL_USER not found — the hook will not be able to enqueue"
+fi
+
 systemctl daemon-reload
 systemctl enable --now seconddns-queued.service
 echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
