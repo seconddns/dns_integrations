@@ -2,10 +2,8 @@
 # Copyright © 2025-2026 SecondDNS
 # Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
-# sqlite3 holds the offline queue. Without it the queue is not degraded, it is
-# absent: operations made while the API is unreachable are lost rather than
-# replayed. The binary comes from a package named sqlite on RHEL-family
-# systems and sqlite3 on Debian-family ones.
+# sqlite3 holds the offline queue: without it, work done while the API is
+# unreachable is lost rather than replayed. RHEL calls the package sqlite.
 if ! command -v sqlite3 &>/dev/null; then
     echo "[*] Installing sqlite3..."
     if command -v apt-get &>/dev/null; then
