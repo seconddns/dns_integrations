@@ -58,6 +58,22 @@ confirm() {
     [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
+valid_ip() {
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
+}
+
+# valid_ip and the server-info parsing below both need it; without this check a
+# missing python3 turns the IP prompt into an endless "not an address" loop
+command -v python3 >/dev/null 2>&1 || {
+    echo "[!] python3 is required by this installer — install it and rerun"
+    exit 1
+}
+
 echo "=== SecondDNS DirectAdmin Integration ==="
 echo ""
 
@@ -123,7 +139,13 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+        # An unusable value here installs cleanly and then rejects every zone
+        # with an opaque HTTP 400, so keep asking until it is an address.
+        while :; do
+            read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+            valid_ip "$MASTER_IP" && break
+            echo "    Not an IPv4 or IPv6 address"
+        done
     fi
 fi
 
@@ -143,6 +165,14 @@ if [ ! -d "/usr/local/directadmin" ]; then
 fi
 
 # Create config
+# A bad master IP installs cleanly and then fails every zone with an opaque
+# HTTP 400 from the API, so refuse here instead.
+if ! valid_ip "$MASTER_IP"; then
+    echo "[!] Not a valid master IP: '$MASTER_IP'"
+    echo "    Pass a real address with --master-ip=IP"
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
     echo "[=] Config exists at $CONFIG_FILE — updating"
 fi
@@ -165,7 +195,7 @@ echo "[+] Log file: $LOG_FILE"
 # Install hooks
 mkdir -p "$HOOKS_DIR"
 
-for hook in dns_create_post.sh dns_delete_post.sh; do
+for hook in dns_create_post.sh dns_delete_post.sh domain_change_post.sh; do
     curl -sf --max-time 10 -o "$HOOKS_DIR/$hook" "$REPO_URL/$hook?t=$(date +%s)"
     chmod +x "$HOOKS_DIR/$hook"
     echo "[+] Installed hook: $HOOKS_DIR/$hook"
@@ -211,7 +241,9 @@ if [ -n "$DNS_IPS" ]; then
     # Check DirectAdmin CustomBuild config
     if [ -f "/usr/local/directadmin/custombuild/options.conf" ]; then
         DA_DNS=$(grep "^dns=" /usr/local/directadmin/custombuild/options.conf 2>/dev/null | cut -d= -f2)
-        echo "[=] DirectAdmin CustomBuild dns=$DA_DNS"
+        # recent DirectAdmin has no dns= key at all; an empty line reads as
+        # "no DNS server", which is wrong — detection below uses the services
+        [ -n "$DA_DNS" ] && echo "[=] DirectAdmin CustomBuild dns=$DA_DNS"
     fi
 
     # Detect PowerDNS
@@ -251,7 +283,7 @@ if [ -n "$DNS_IPS" ]; then
                 fi
             fi
         elif [ "$IP_PREFERENCE" = "v4" ]; then
-            if grep -q 'listen-on\s' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
+            if grep -q 'listen-on[[:space:]]' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
                 if grep -q 'listen-on.*none' "$NAMED_OPTIONS" 2>/dev/null; then
                     echo "[!] WARNING: BIND has listen-on set to none — IPv4 disabled"
                 fi
@@ -340,8 +372,8 @@ if [ -n "$DNS_IPS" ]; then
                     if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
                         cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
                         # Remove 'none;' if present, then add our IP
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to allow-transfer"
                     fi
                 fi
@@ -350,7 +382,7 @@ if [ -n "$DNS_IPS" ]; then
                 if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
                     cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
                     # Add before closing }; of options block
-                    sed -i "/^options\s*{/,/^};/ {
+                    sed -i "/^options[[:space:]]*{/,/^};/ {
                         /^};/ i\\
 \\tallow-transfer { $SECONDARY_IP; };\\
 \\talso-notify { $SECONDARY_IP; };
@@ -364,14 +396,14 @@ if [ -n "$DNS_IPS" ]; then
                 if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
                     echo "[!] also-notify does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to also-notify?"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "/also-notify/s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to also-notify"
                     fi
                 fi
             else
                 if confirm "Add also-notify for $SECONDARY_IP?"; then
-                    sed -i "/^options\s*{/,/^};/ {
+                    sed -i "/^options[[:space:]]*{/,/^};/ {
                         /^};/ i\\
 \\talso-notify { $SECONDARY_IP; };
                     }" "$NAMED_OPTIONS"
@@ -424,7 +456,8 @@ echo ""
 echo "  Config:  $CONFIG_FILE"
 echo "  Hooks:   $HOOKS_DIR/dns_create_post.sh"
 echo "           $HOOKS_DIR/dns_delete_post.sh"
+echo "           $HOOKS_DIR/domain_change_post.sh"
 echo "  Logs:    tail -f $LOG_FILE"
 echo ""
-echo "  Domains created/deleted in DirectAdmin will be"
+echo "  Domains created, renamed or deleted in DirectAdmin will be"
 echo "  automatically synced to your secondary DNS."

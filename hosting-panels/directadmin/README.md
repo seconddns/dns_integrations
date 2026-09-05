@@ -6,16 +6,18 @@ Automatically sync DNS zones from DirectAdmin to SecondDNS via AXFR zone transfe
 
 ![How it works](doc/directadmin-flow.svg)
 
-DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/developer/hooks/dns.html) that run after DNS events. This integration installs two hooks:
+DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/developer/hooks/dns.html) that run after DNS events. This integration installs three hooks:
 
 - **dns_create_post.sh** — when a domain is created, adds the zone to SecondDNS
 - **dns_delete_post.sh** — when a domain is deleted, removes the zone from SecondDNS
+- **domain_change_post.sh** — when a domain is renamed, removes the old zone and adds the new one. DirectAdmin fires no DNS create event on a rename, so without this hook the zone would disappear from the secondary and never come back
 
 Zone data is transferred via AXFR from your DirectAdmin server to the SecondDNS secondary nameserver.
 
 ## Tested on
 
 - DirectAdmin 1.699 with BIND/named on Ubuntu 22.04
+- DirectAdmin 1.709 with BIND/named on AlmaLinux 9.8
 
 ## Requirements
 

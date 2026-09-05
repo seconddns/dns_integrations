@@ -82,6 +82,22 @@ confirm() {
     [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
+valid_ip() {
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
+}
+
+# valid_ip and the server-info parsing below both need it; without this check a
+# missing python3 turns the IP prompt into an endless "not an address" loop
+command -v python3 >/dev/null 2>&1 || {
+    echo "[!] python3 is required by this installer — install it and rerun"
+    exit 1
+}
+
 echo "=== SecondDNS CyberPanel Integration ==="
 echo ""
 
@@ -149,7 +165,13 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+        # An unusable value here installs cleanly and then rejects every zone
+        # with an opaque HTTP 400, so keep asking until it is an address.
+        while :; do
+            read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+            valid_ip "$MASTER_IP" && break
+            echo "    Not an IPv4 or IPv6 address"
+        done
     fi
 fi
 
@@ -160,6 +182,14 @@ chmod +x "$INSTALL_DIR/seconddns"
 echo "[+] Installed CLI to $INSTALL_DIR/seconddns"
 
 # Create or update config
+# A bad master IP installs cleanly and then fails every zone with an opaque
+# HTTP 400 from the API, so refuse here instead.
+if ! valid_ip "$MASTER_IP"; then
+    echo "[!] Not a valid master IP: '$MASTER_IP'"
+    echo "    Pass a real address with --master-ip=IP"
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
     echo "[=] Config exists at $CONFIG_FILE — updating"
 fi
@@ -294,7 +324,7 @@ if [ -n "$PDNS_CONF" ]; then
     fi
 
     if [ -z "$DNS_IPS" ]; then
-        DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
+        DNS_IPS=$(grep -E "^dns_ips[[:space:]]*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips[[:space:]]*=[[:space:]]*//' | tr -d ' ')
         [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IP: " DNS_IPS < /dev/tty
     fi
 

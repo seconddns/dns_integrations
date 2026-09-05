@@ -58,6 +58,22 @@ confirm() {
     [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
+valid_ip() {
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
+}
+
+# valid_ip and the server-info parsing below both need it; without this check a
+# missing python3 turns the IP prompt into an endless "not an address" loop
+command -v python3 >/dev/null 2>&1 || {
+    echo "[!] python3 is required by this installer — install it and rerun"
+    exit 1
+}
+
 echo "=== SecondDNS Plesk Integration ==="
 echo ""
 
@@ -137,7 +153,13 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+        # An unusable value here installs cleanly and then rejects every zone
+        # with an opaque HTTP 400, so keep asking until it is an address.
+        while :; do
+            read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+            valid_ip "$MASTER_IP" && break
+            echo "    Not an IPv4 or IPv6 address"
+        done
     fi
 fi
 
@@ -151,6 +173,14 @@ else
 fi
 
 # Create config
+# A bad master IP installs cleanly and then fails every zone with an opaque
+# HTTP 400 from the API, so refuse here instead.
+if ! valid_ip "$MASTER_IP"; then
+    echo "[!] Not a valid master IP: '$MASTER_IP'"
+    echo "    Pass a real address with --master-ip=IP"
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
     echo "[=] Config exists at $CONFIG_FILE — updating"
 fi
@@ -351,7 +381,7 @@ else
                     sed -i '/allow-transfer/s/none;//g' "$NAMED_OPTIONS"
                     # Add our IP if not already there
                     if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\
@@ -362,7 +392,7 @@ else
                 if grep -q "also-notify" "$NAMED_OPTIONS"; then
                     sed -i '/also-notify/s/none;//g' "$NAMED_OPTIONS"
                     if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\

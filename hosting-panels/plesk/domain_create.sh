@@ -13,9 +13,9 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 [ -f "$CONFIG" ] || exit 0
 
-API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
-API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
-MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
+API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip[[:space:]]*=[[:space:]]*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] || [ -z "$MASTER_IP" ] && exit 0
 
