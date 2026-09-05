@@ -115,9 +115,26 @@ VERIFY=$(curl -sf --max-time 10 \
     exit 1
 }
 
-# Detect server IPs
-SERVER_V4=$(curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
-SERVER_V6=$(curl -6 -sf --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+# The kernel's route to a public address names the source the secondary will
+# see; an echo service is asked only for IPv4, where NAT can hide it.
+detect_v4() {
+    local ip
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
+    case "$ip" in
+        ""|10.*|127.*|169.254.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*)
+            # behind NAT or undetectable locally: ask the outside
+            curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "" ;;
+        *) echo "$ip" ;;
+    esac
+}
+detect_v6() {
+    # link-local and unique-local are not reachable from the secondary
+    ip -6 route get 2606:4700:4700::1111 2>/dev/null \
+        | sed -n 's/.*src \([0-9a-f:]*\).*/\1/p' \
+        | grep -viE '^(fe80|f[cd])' || true
+}
+SERVER_V4=$(detect_v4)
+SERVER_V6=$(detect_v6)
 
 # Get available secondary DNS IPs from API
 API_DNS_IPS=$(curl -sf --max-time 10 \
