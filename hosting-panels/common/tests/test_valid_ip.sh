@@ -1,7 +1,5 @@
 #!/bin/bash
-# Tests for valid_ip() in every panel installer: a value that is not an address
-# must be refused, because an accepted one installs cleanly and then fails every
-# zone with an opaque HTTP 400 from the API.
+# Tests for valid_ip() in every panel installer: a non-address must be refused.
 # Run: bash hosting-panels/common/tests/test_valid_ip.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -40,6 +38,12 @@ localhost|reject
 1.2.3.-1|reject
  1.2.3.4|reject
 example.com|reject
+:::|reject
+1::2::3|reject
+12345::1|reject
+1:2:3:4:5:6:7:8:9|reject
+2001:db8::1::2|reject
+2001:db8:|reject
 CASES
 done
 
