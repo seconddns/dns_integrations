@@ -6,65 +6,58 @@ Automatically sync DNS zones from DirectAdmin to SecondDNS via AXFR zone transfe
 
 ![How it works](doc/directadmin-flow.svg)
 
-DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/developer/hooks/dns.html) that run after DNS events. This integration installs two hooks:
+DirectAdmin provides [custom hook scripts](https://docs.directadmin.com/developer/hooks/dns.html) that run after DNS events. This integration installs three hooks:
 
 - **dns_create_post.sh** — when a domain is created, adds the zone to SecondDNS
 - **dns_delete_post.sh** — when a domain is deleted, removes the zone from SecondDNS
+- **domain_change_post.sh** — when a domain is renamed, removes the old zone and adds the new one. DirectAdmin fires no DNS create event on a rename, so without this hook the zone would disappear from the secondary and never come back
 
 Zone data is transferred via AXFR from your DirectAdmin server to the SecondDNS secondary nameserver.
 
 ## Tested on
 
 - DirectAdmin 1.699 with BIND/named on Ubuntu 22.04
+- DirectAdmin 1.709 with BIND/named on AlmaLinux 9.8
 
 ## Requirements
 
-- DirectAdmin 1.6+ with BIND/named or PowerDNS
+- DirectAdmin 1.6+ (it writes zones for BIND/named, its only DNS server)
+- `python3` and `sqlite3` — the installer stops if `python3` is missing
 - Root access
 - SecondDNS API key — [get one here](https://seconddns.com/dashboard/api-key)
 
 ## Install
 
 ```bash
-curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/directadmin/install.sh" \
+curl -sL "https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/directadmin/install.sh" \
   | bash -s -- --api-key=YOUR_API_KEY
 ```
 
 ## Uninstall
 
 ```bash
-curl -sL "https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/directadmin/uninstall.sh" \
+curl -sL "https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/directadmin/uninstall.sh" \
   | bash
 ```
 
-## AXFR Configuration
+## AXFR — done by the installer
 
-After installation, ensure your DNS server allows zone transfers to the SecondDNS secondary IP.
-
-### BIND/named
-
-In each zone block or `named.conf.options`:
+The installer configures this: it edits the `options` block of `named.conf`
+after asking, keeps a `.bak` copy and reloads named.
 
 ```
 allow-transfer { <secondary-ip>; };
 also-notify { <secondary-ip>; };
 ```
 
-### PowerDNS
-
-In `pdns.conf`:
-
-```
-allow-axfr-ips=<secondary-ip>
-also-notify=<secondary-ip>
-```
+Only needed by hand if you declined the prompt.
 
 ## Nameserver Configuration
 
 Add the secondary nameserver to your domains. In DirectAdmin:
 
 1. Go to **DNS Administration** or **DNS Management**
-2. Add an NS record: `ns2.seconddns.com`
+2. Add an NS record with the nameserver shown in your SecondDNS dashboard (for example `ns2.seconddns.com.`) — accounts are served by different nameservers, so take the name from there rather than from this page
 
 Or update the default zone template to include it for all new domains.
 
@@ -75,9 +68,9 @@ Or update the default zone template to include it for all new domains.
 tail -f /var/log/seconddns.log
 ```
 
-**Verify hooks are installed:**
+**Verify hooks are installed** (three of them; the rename hook is not a `dns_` one):
 ```bash
-ls -la /usr/local/directadmin/scripts/custom/dns_*_post.sh
+ls -la /usr/local/directadmin/scripts/custom/{dns_create_post,dns_delete_post,domain_change_post}.sh
 ```
 
 **Test hook manually:**

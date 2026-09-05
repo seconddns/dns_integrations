@@ -13,9 +13,9 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 [ -f "$CONFIG" ] || exit 0
 
-API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
-API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
-MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
+API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip[[:space:]]*=[[:space:]]*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] || [ -z "$MASTER_IP" ] && exit 0
 [ -z "$domain" ] && exit 0
@@ -26,21 +26,24 @@ case "$caller" in
     *) exit 0 ;;
 esac
 
-log "Zone created: $domain (caller=$caller, user=$username)"
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NAME="$domain"
+if ! canonical_domain "$domain"; then
+    log "[!] Zone '$domain' refused: $DOMAIN_ERROR (directadmin hook)"
+    exit 0
+fi
+domain="$DOMAIN"
+# keep what the panel actually handed over, for later diagnosis
+RAW_NOTE=""; [ "$RAW_NAME" != "$domain" ] && RAW_NOTE=" (received as '$RAW_NAME')"
+log "Zone created: $domain (caller=$caller, user=$username)$RAW_NOTE"
 
-# Add zone to SecondDNS
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-DirectAdmin/1.0" \
-    -d "{\"name\":\"$domain\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] Zone $domain added to SecondDNS"
+QUEUE="/usr/local/bin/seconddns-queue"
+if "$QUEUE" enqueue create "$domain" "$MASTER_IP"; then
+    log "[>] Zone $domain queued for SecondDNS"
 else
-    log "[!] Failed to add zone $domain to SecondDNS"
+    log "[!] Zone $domain NOT queued (seconddns-queue failed)"
 fi
 
 exit 0

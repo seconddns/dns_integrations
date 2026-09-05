@@ -6,13 +6,13 @@ set -e
 
 # SecondDNS Plesk Integration Installer
 # Usage:
-#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes]
-#   curl -sL https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_KEY
+#   ./install.sh --api-key=YOUR_API_KEY [--api-url=URL] [--master-ip=IP] [--yes] [--ref=BRANCH]
+#   curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosting-panels/plesk/install.sh | bash -s -- --api-key=YOUR_KEY
 
 CONFIG_FILE="/etc/seconddns.conf"
 LOG_FILE="/var/log/seconddns.log"
 SCRIPT_DIR="/usr/local/bin"
-REPO_URL="https://raw.githubusercontent.com/0kaba0hub/dns_integrations/main/hosting-panels/plesk"
+REF="main"  # git ref (branch/tag) to install from; --ref=develop for pre-release testing
 
 API_KEY=""
 API_URL="https://seconddns.com"
@@ -22,6 +22,7 @@ AUTO_YES=0
 for arg in "$@"; do
     case $arg in
         --api-key=*) API_KEY="${arg#*=}" ;;
+        --ref=*) REF="${arg#*=}" ;;
         --api-url=*) API_URL="${arg#*=}" ;;
         --master-ip=*) MASTER_IP="${arg#*=}" ;;
         --yes|-y) AUTO_YES=1 ;;
@@ -36,6 +37,7 @@ for arg in "$@"; do
             ;;
     esac
 done
+REPO_URL="https://raw.githubusercontent.com/seconddns/dns_integrations/$REF/hosting-panels/plesk"
 
 if [ -z "$API_KEY" ]; then
     echo "Error: --api-key is required"
@@ -56,6 +58,22 @@ confirm() {
     [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
+valid_ip() {
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
+}
+
+# valid_ip and the server-info parsing below both need it; without this check a
+# missing python3 turns the IP prompt into an endless "not an address" loop
+command -v python3 >/dev/null 2>&1 || {
+    echo "[!] python3 is required by this installer — install it and rerun"
+    exit 1
+}
+
 echo "=== SecondDNS Plesk Integration ==="
 echo ""
 
@@ -67,64 +85,6 @@ fi
 
 PLESK_VER=$(plesk version 2>/dev/null | head -1 || echo "unknown")
 echo "[+] Plesk detected: $PLESK_VER"
-
-# Install IDN utilities (for internationalized domain name support)
-echo "[*] Checking IDN utilities..."
-if ! command -v idn2 &>/dev/null && ! command -v idn &>/dev/null; then
-    echo "[*] Installing idn2 for IDN domain support..."
-    IDN_INSTALLED=0
-
-    # Detect OS and use appropriate package manager
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="$ID"
-    elif [ -f /etc/lsb-release ]; then
-        . /etc/lsb-release
-        OS_ID="${DISTRIB_ID,,}"
-    fi
-
-    case "$OS_ID" in
-        ubuntu|debian)
-            apt-get update -qq 2>/dev/null
-            apt-get install -y -qq idn2 2>/dev/null && IDN_INSTALLED=1
-            ;;
-        fedora|rhel|centos|almalinux|rocky)
-            if command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-        alpine)
-            apk add --no-cache libidn2-tools 2>/dev/null && IDN_INSTALLED=1
-            ;;
-        *)
-            # Fallback: try apt-get, then dnf, then yum
-            if command -v apt-get &>/dev/null; then
-                apt-get update -qq 2>/dev/null
-                apt-get install -y -qq idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v dnf &>/dev/null; then
-                dnf install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            elif command -v yum &>/dev/null; then
-                yum install -y idn2 2>/dev/null && IDN_INSTALLED=1
-            fi
-            ;;
-    esac
-
-    if [ "$IDN_INSTALLED" -eq 1 ] && (command -v idn2 &>/dev/null || command -v idn &>/dev/null); then
-        echo "[+] IDN utilities installed successfully"
-    else
-        echo "[!] Warning: Could not install IDN utilities"
-        echo "    IDN domains will still work but require idn2/idn on the system"
-        echo "    Install manually:"
-        echo "      Ubuntu/Debian: apt-get install idn2"
-        echo "      AlmaLinux/Rocky: dnf install idn2"
-        echo "      RHEL/CentOS: yum install idn2"
-        echo "      Alpine: apk add libidn2-tools"
-    fi
-else
-    echo "[+] IDN utilities already installed"
-fi
 
 # Verify API key
 echo "[*] Verifying API key..."
@@ -138,9 +98,26 @@ curl -sf --max-time 10 \
     exit 1
 }
 
-# Detect server IPs
-SERVER_V4=$(curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
-SERVER_V6=$(curl -6 -sf --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+# The kernel's route to a public address names the source the secondary will
+# see; an echo service is asked only for IPv4, where NAT can hide it.
+detect_v4() {
+    local ip
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
+    case "$ip" in
+        ""|10.*|127.*|169.254.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*)
+            # behind NAT or undetectable locally: ask the outside
+            curl -4 -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo "" ;;
+        *) echo "$ip" ;;
+    esac
+}
+detect_v6() {
+    # link-local and unique-local are not reachable from the secondary
+    ip -6 route get 2606:4700:4700::1111 2>/dev/null \
+        | sed -n 's/.*src \([0-9a-f:]*\).*/\1/p' \
+        | grep -viE '^(fe80|f[cd])' || true
+}
+SERVER_V4=$(detect_v4)
+SERVER_V6=$(detect_v6)
 
 # Get secondary DNS info from API
 API_SERVER_INFO=$(curl -sf --max-time 10 \
@@ -193,7 +170,13 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+        # An unusable value here installs cleanly and then rejects every zone
+        # with an opaque HTTP 400, so keep asking until it is an address.
+        while :; do
+            read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+            valid_ip "$MASTER_IP" && break
+            echo "    Not an IPv4 or IPv6 address"
+        done
     fi
 fi
 
@@ -207,6 +190,14 @@ else
 fi
 
 # Create config
+# A bad master IP installs cleanly and then fails every zone with an opaque
+# HTTP 400 from the API, so refuse here instead.
+if ! valid_ip "$MASTER_IP"; then
+    echo "[!] Not a valid master IP: '$MASTER_IP'"
+    echo "    Pass a real address with --master-ip=IP"
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
     echo "[=] Config exists at $CONFIG_FILE — updating"
 fi
@@ -215,6 +206,7 @@ cat > "$CONFIG_FILE" << EOF
 api_url = $API_URL
 api_key = $API_KEY
 master_ip = $MASTER_IP
+delete_check_master_ip = true
 EOF
 chown root:root "$CONFIG_FILE"
 chmod 644 "$CONFIG_FILE"
@@ -231,6 +223,27 @@ for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     chmod +x "$SCRIPT_DIR/seconddns-plesk-${script}"
     echo "[+] Installed: $SCRIPT_DIR/seconddns-plesk-${script}"
 done
+
+# --- Offline operation queue ---
+echo ""
+echo "--- Installing offline operation queue ---"
+COMMON_URL="${REPO_URL%/*}/common"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns "$COMMON_URL/seconddns?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-domain "$COMMON_URL/seconddns-domain?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-owner "$COMMON_URL/seconddns-owner?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-migrate-master "$COMMON_URL/seconddns-migrate-master?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-reconcile "$COMMON_URL/seconddns-reconcile?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns_common.py "$COMMON_URL/seconddns_common.py?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-queue?t=$(date +%s)"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
+curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
+chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
+mkdir -p /var/lib/seconddns
+bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")
+systemctl daemon-reload
+systemctl enable --now seconddns-queued.service
+echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
 
 # --- Register Plesk event handlers ---
 echo ""
@@ -386,7 +399,7 @@ else
                     sed -i '/allow-transfer/s/none;//g' "$NAMED_OPTIONS"
                     # Add our IP if not already there
                     if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\
@@ -397,7 +410,7 @@ else
                 if grep -q "also-notify" "$NAMED_OPTIONS"; then
                     sed -i '/also-notify/s/none;//g' "$NAMED_OPTIONS"
                     if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\
@@ -425,27 +438,18 @@ else
     echo -e "    \033[1;33mThen click Apply.\033[0m"
 fi
 
-# Initial sync
 echo ""
-if confirm "Sync existing domains to secondary DNS now?"; then
-    echo "[*] Syncing domains..."
-    added=0
-    while IFS= read -r sdomain; do
-        [ -z "$sdomain" ] && continue
-        response=$(curl -sf --max-time 15 \
-            -X POST \
-            -H "X-API-Key: $API_KEY" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: SecondDNS-Plesk/1.0" \
-            -d "{\"name\":\"$sdomain\",\"masterIp\":\"$MASTER_IP\"}" \
-            "$API_URL/api/zones" 2>/dev/null)
-        if [ $? -eq 0 ]; then
-            echo "    [+] $sdomain"
-            added=$((added+1))
-        fi
-    done < <(plesk bin site --list 2>/dev/null)
-    echo "[+] Synced $added domains"
+# reconcile already knows where each panel keeps its zone list; --add-missing
+# only, since removing a zone the panel lacks is a separate decision.
+if confirm "Queue existing zones for delivery to secondary DNS now?"; then
+    echo "[*] Syncing zones..."
+    if /usr/local/bin/seconddns-reconcile --add-missing --apply; then
+        echo "    Delivery runs in the background: seconddns-queue status"
+    else
+        echo "[!] Initial sync incomplete — rerun: seconddns-reconcile --add-missing --apply"
+    fi
 fi
+
 
 echo ""
 echo "=== Installation complete ==="

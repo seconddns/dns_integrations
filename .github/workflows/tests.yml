@@ -1,0 +1,68 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq idn2 sqlite3 curl util-linux
+
+      # a test nobody added a step for runs nowhere and says nothing
+      - name: Every test script has a step
+        run: |
+          missing=0
+          for t in hosting-panels/common/tests/test_*.sh; do
+            grep -q "$(basename "$t")" .github/workflows/tests.yml || {
+              echo "::error file=$t::no step in the workflow runs this test"; missing=1; }
+          done
+          exit $missing
+
+      - name: Syntax check every shell script
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            head -1 "$f" | grep -q '^#!.*\(bash\|sh\)' || continue
+            bash -n "$f" || { echo "::error file=$f::syntax error"; fail=1; }
+          done < <(find hosting-panels -type f \( -name '*.sh' -o ! -name '*.*' \))
+          exit $fail
+
+      - name: test_domain.sh
+        run: bash hosting-panels/common/tests/test_domain.sh
+
+      - name: test_queue.sh
+        run: bash hosting-panels/common/tests/test_queue.sh
+
+      - name: test_valid_ip.sh
+        run: bash hosting-panels/common/tests/test_valid_ip.sh
+
+      - name: test_domain_change_hook.sh
+        run: bash hosting-panels/common/tests/test_domain_change_hook.sh
+
+      - name: test_initial_sync.sh
+        run: bash hosting-panels/common/tests/test_initial_sync.sh
+
+      - name: test_ip_detection.sh
+        run: bash hosting-panels/common/tests/test_ip_detection.sh
+
+      - name: test_cli.sh
+        run: bash hosting-panels/common/tests/test_cli.sh
+
+      - name: test_cyberpanel_db.sh
+        run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
+
+      - name: test_cyberpanel_plugin.sh
+        run: bash hosting-panels/common/tests/test_cyberpanel_plugin.sh
+
+      # needs root and a second user; the runner gives both, so it runs here
+      # rather than reporting itself skipped as it does on a workstation
+      - name: test_queue_shared_access.sh
+        run: sudo bash hosting-panels/common/tests/test_queue_shared_access.sh

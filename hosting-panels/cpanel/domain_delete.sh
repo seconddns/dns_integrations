@@ -13,8 +13,9 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 [ -f "$CONFIG" ] || exit 0
 
-API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
-API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
+API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip[[:space:]]*=[[:space:]]*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] && exit 0
 
@@ -30,30 +31,36 @@ except Exception:
 
 [ -z "$ZONE_NAME" ] && exit 0
 
-# cPanel stores all domains in Punycode internally — no IDN conversion needed
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NAME="$ZONE_NAME"
+if ! canonical_domain "$ZONE_NAME"; then
+    log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (cpanel hook)"
+    exit 0
+fi
+ZONE_NAME="$DOMAIN"
+# keep what the panel actually handed over, for later diagnosis
+RAW_NOTE=""; [ "$RAW_NAME" != "$ZONE_NAME" ] && RAW_NOTE=" (received as '$RAW_NAME')"
 
-log "Zone deleted: $ZONE_NAME (cpanel hook)"
+log "Zone deleted: $ZONE_NAME (cpanel hook)$RAW_NOTE"
 
-zone_id=$(curl -sf --max-time 10 \
-    -H "X-API-Key: $API_KEY" \
-    -H "User-Agent: SecondDNS-cPanel/1.0" \
-    "$API_URL/api/zones/by-name/$ZONE_NAME" 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+OWNER_LIB="/usr/local/bin/seconddns-owner"
+[ -r "$OWNER_LIB" ] && SECONDDNS_OWNER_LIB=1 . "$OWNER_LIB"
+if type owner_check >/dev/null 2>&1; then
+    owner_check "$ZONE_NAME" "$MASTER_IP"
+    case $? in
+        1) log "[~] Zone $ZONE_NAME is mastered by $OWNER_IP, not this server — delete skipped"; exit 0 ;;
+        2) log "[~] Zone $ZONE_NAME owner check: API unreachable, queued; checked again at delivery" ;;
+        4) log "[!] Zone $ZONE_NAME owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check" ;;
+    esac
+fi
 
-if [ -n "$zone_id" ]; then
-    curl -sf --max-time 15 \
-        -X DELETE \
-        -H "X-API-Key: $API_KEY" \
-        -H "User-Agent: SecondDNS-cPanel/1.0" \
-        "$API_URL/api/zones/$zone_id" 2>/dev/null
-
-    if [ $? -eq 0 ]; then
-        log "[+] Zone $ZONE_NAME removed from SecondDNS"
-    else
-        log "[!] Failed to remove zone $ZONE_NAME from SecondDNS"
-    fi
+QUEUE="/usr/local/bin/seconddns-queue"
+if "$QUEUE" enqueue delete "$ZONE_NAME" "$MASTER_IP"; then
+    log "[>] Zone $ZONE_NAME removal queued for SecondDNS"
 else
-    log "[~] Zone $ZONE_NAME not found in SecondDNS (already removed?)"
+    log "[!] Zone $ZONE_NAME removal NOT queued (seconddns-queue failed)"
 fi
 
 exit 0

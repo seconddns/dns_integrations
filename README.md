@@ -19,9 +19,9 @@ All integrations use the same pattern: catch the panel event, call the SecondDNS
 
 | Panel | Mechanism | Tested on |
 |:------|:----------|:----------|
-| [cPanel/WHM](hosting-panels/cpanel/) | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
-| [CyberPanel](hosting-panels/cyberpanel/) | Django signals (`postWebsiteCreation`, `postZoneCreation`) | CyberPanel 2.4.5 |
-| [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`) | DirectAdmin 1.699 |
+| [cPanel/WHM](hosting-panels/cpanel/) **(beta)** | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
+| [CyberPanel](hosting-panels/cyberpanel/) | Django signals (6: website, domain and zone, create and delete) | CyberPanel 2.4.5 |
+| [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`, `domain_change_post`) | DirectAdmin 1.699, 1.709 |
 | [Plesk](hosting-panels/plesk/) | Event Manager (12 events, incl. rename + aliases) | Plesk Obsidian 18.0.77.2 |
 
 ### Quick install
@@ -48,6 +48,64 @@ curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosti
 
 See the README in each directory for options, AXFR configuration, and troubleshooting.
 
+### Offline operation queue
+
+Every panel integration ships with a local offline queue
+([`hosting-panels/common/seconddns-queue`](hosting-panels/common/seconddns-queue)).
+Every hook first passes the zone name through
+[`seconddns-domain`](hosting-panels/common/seconddns-domain) (lowercase, IDNA2008
+Punycode via `idn2`, LDH check); a name that fails is logged with the reason and
+never enqueued.
+Panel hooks enqueue zone operations into a SQLite database
+(`/var/lib/seconddns/queue.db`); the `seconddns-queued` systemd worker is the
+single delivery path — after every enqueue the hook pokes the worker through a
+unix datagram socket (`/var/lib/seconddns/queued.sock`), so delivery starts
+instantly with no polling; a rare fallback tick (`poll_interval`, 60 s) only
+guards against lost wakeups. Operations are delivered in strict FIFO order. If the SecondDNS API is unreachable (outage or maintenance), the
+worker backs off exponentially and retries until everything is delivered.
+Nothing your customers do in the panel during a SecondDNS downtime is lost,
+and hooks never block on API timeouts (they only do a local INSERT).
+
+Worker settings (optional `[queue]` section in `/etc/seconddns.conf`):
+
+```ini
+[queue]
+poll_interval = 60     # fallback idle tick (wakeups are socket-driven)
+http_timeout = 15      # seconds per API request
+backoff_min = 30       # first retry delay when the API is down
+backoff_max = 28800    # retry delay ceiling (8 h)
+```
+
+Replay semantics:
+
+- retryable errors (timeout, 5xx, redirects, non-JSON answers from a proxy or maintenance page, 401/403) pause delivery; the worker retries with exponential backoff
+- duplicate delivery is safe: `409` on create and `404` on delete count as success
+- hard errors (`400`/`422`) mark the operation `failed` and the drain continues
+
+Inspect the queue on any panel server:
+
+```bash
+seconddns-queue status              # pending / failed / oldest age / last error (exit 0/1/2)
+seconddns-queue status --json       # same as JSON (for monitoring agents)
+seconddns-queue flush               # manual one-shot drain (diagnostics)
+seconddns-queue retry <id|--all>    # requeue failed operations
+seconddns-queue drop <id|--all>     # discard failed operations
+systemctl status seconddns-queued   # delivery worker
+```
+
+Requires `sqlite3` and `python3` (both present by default on all supported panels).
+
+## Migrating a panel server
+
+When domains move between two panel servers that share one SecondDNS account,
+two things keep the zones right: every delete hook checks that the zone is
+mastered by this server before deleting it (`delete_check_master_ip`, on by
+default), and `seconddns-migrate-master` re-points the moved zones to the new
+server with one `PATCH` per zone. `seconddns-reconcile` compares the DNS
+zones the panel masters with SecondDNS and, with `--add-missing` /
+`--remove-stale --apply`, queues the difference. Order of operations, options and the config key are in
+[MIGRATION.md](MIGRATION.md).
+
 ---
 
 ## Monitoring
@@ -55,7 +113,9 @@ See the README in each directory for options, AXFR configuration, and troublesho
 | Tool | Type | What it checks |
 |:-----|:-----|:---------------|
 | [Nagios / Icinga](nagios_plugins/) | Check plugin (bash) | Zone sync status, stale zones, master reachability |
+| [Nagios / Icinga](nagios_plugins/check_seconddns_queue.sh) | Check plugin (bash) | Offline queue backlog on a panel server (`-w`/`-c` age thresholds) |
 | [Zabbix](zabbix_templates/) | HTTP Agent template | Zone counters, triggers, graphs — no agent required |
+| [Zabbix](zabbix_templates/seconddns_queue.yaml) | Agent template | Offline queue backlog on a panel server (needs a `UserParameter`) |
 
 Both integrations use the SecondDNS API key. See the README in each directory for installation and configuration.
 
@@ -65,7 +125,7 @@ Both integrations use the SecondDNS API key. See the README in each directory fo
 
 - SecondDNS account and API key — [get one here](https://seconddns.com/dashboard/api-key)
 - TCP port 53 open from your server to the SecondDNS secondary nameserver IP
-- BIND or PowerDNS configured with `allow-transfer` and `also-notify` for the secondary IP
+- BIND or PowerDNS with `allow-transfer` and `also-notify` for the secondary IP — the installer configures this after asking, and keeps a backup of the file it edits
 
 ---
 

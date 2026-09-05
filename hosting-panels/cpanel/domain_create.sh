@@ -13,9 +13,9 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 [ -f "$CONFIG" ] || exit 0
 
-API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
-API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
-MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
+API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip[[:space:]]*=[[:space:]]*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] || [ -z "$MASTER_IP" ] && exit 0
 
@@ -32,22 +32,25 @@ except Exception:
 
 [ -z "$ZONE_NAME" ] && exit 0
 
-# cPanel stores all domains in Punycode internally — no IDN conversion needed
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NAME="$ZONE_NAME"
+if ! canonical_domain "$ZONE_NAME"; then
+    log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (cpanel hook)"
+    exit 0
+fi
+ZONE_NAME="$DOMAIN"
+# keep what the panel actually handed over, for later diagnosis
+RAW_NOTE=""; [ "$RAW_NAME" != "$ZONE_NAME" ] && RAW_NOTE=" (received as '$RAW_NAME')"
 
-log "Zone created: $ZONE_NAME (cpanel hook)"
+log "Zone created: $ZONE_NAME (cpanel hook)$RAW_NOTE"
 
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-cPanel/1.0" \
-    -d "{\"name\":\"$ZONE_NAME\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
-
-if [ $? -eq 0 ]; then
-    log "[+] Zone $ZONE_NAME added to SecondDNS"
+QUEUE="/usr/local/bin/seconddns-queue"
+if "$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"; then
+    log "[>] Zone $ZONE_NAME queued for SecondDNS"
 else
-    log "[!] Failed to add zone $ZONE_NAME to SecondDNS"
+    log "[!] Zone $ZONE_NAME NOT queued (seconddns-queue failed)"
 fi
 
 exit 0

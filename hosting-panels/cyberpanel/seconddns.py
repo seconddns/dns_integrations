@@ -7,13 +7,9 @@ CyberPanel integration for secondary DNS service.
 
 Works in two modes:
   1. Django signal plugin — hooks into CyberPanel's postWebsiteCreation/Deletion signals
-  2. CLI — manual add/remove/sync/list commands
+  2. ensure-signals — re-register the Django signal handlers after a restart
 
-CLI usage:
-  seconddns add <domain>       — Register domain as secondary zone
-  seconddns remove <domain>    — Remove domain from secondary DNS
-  seconddns sync               — Sync all CyberPanel domains with secondary DNS
-  seconddns list               — List zones on secondary DNS
+Zone management from the command line is `seconddns`, shared by every panel.
 
 Configuration: /etc/seconddns.conf
 """
@@ -103,6 +99,38 @@ def api_request(config, method, path, data=None):
         except Exception:
             error_data = {"error": error_body}
         return {"_status": e.code, **error_data}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return {"_status": 0, "error": str(e)}
+
+
+QUEUE_BIN = "/usr/local/bin/seconddns-queue"
+DOMAIN_BIN = "/usr/local/bin/seconddns-domain"
+OWNER_BIN = "/usr/local/bin/seconddns-owner"
+
+
+def canonical_domain(domain):
+    """Lowercase + Punycode + LDH via the shared tool. Returns (name, None) or (None, reason)."""
+    try:
+        r = subprocess.run([DOMAIN_BIN, domain], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        return None, str(e)
+    if r.returncode != 0:
+        return None, r.stderr.strip() or "refused"
+    return r.stdout.strip(), None
+
+
+def queue_op(op, domain, master_ip=""):
+    """Persist the operation in the local offline queue.
+
+    The seconddns-queued systemd worker delivers it in FIFO order."""
+    try:
+        subprocess.run([QUEUE_BIN, "enqueue", op, domain, master_ip],
+                       check=True, timeout=10)
+        logger.info("    %s %s queued for delivery", op, domain)
+        return True
+    except Exception as e:
+        logger.error("    Failed to enqueue %s %s: %s", op, domain, e)
+        return False
 
 
 def list_zones(config):
@@ -114,24 +142,17 @@ def list_zones(config):
 
 
 def add_zone(config, domain):
-    domain = domain.lower().rstrip(".")
+    raw = domain
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
+        return False
+    if domain != raw:
+        logger.info("    zone name received as %r", raw)
     if not config or not config.get("master_ip"):
         return False
     logger.info("[+] Adding zone: %s (master: %s)", domain, config["master_ip"])
-    result = api_request(config, "POST", "/api/zones", {
-        "name": domain,
-        "masterIp": config["master_ip"],
-    })
-    if result and result.get("_status"):
-        status = result["_status"]
-        error = result.get("error", "Unknown error")
-        if status == 409:
-            logger.info("    Already exists, skipping.")
-        else:
-            logger.error("    Error (%s): %s", status, error)
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("create", domain, config["master_ip"])
 
 
 def find_zone_by_name(config, domain):
@@ -142,18 +163,27 @@ def find_zone_by_name(config, domain):
 
 
 def remove_zone(config, domain):
-    domain = domain.lower().rstrip(".")
-    zone = find_zone_by_name(config, domain)
-    if not zone:
-        logger.info("[-] Zone %s not found on secondary DNS.", domain)
+    raw = domain
+    domain, reason = canonical_domain(domain)
+    if reason:
+        logger.error("[!] Zone refused: %s", reason)
         return False
+    if domain != raw:
+        logger.info("    zone name received as %r", raw)
+    master_ip = (config or {}).get("master_ip", "")
+    # is the zone mastered by this server? (skipped if the API is unreachable;
+    # the worker repeats the check at delivery)
+    try:
+        r = subprocess.run([OWNER_BIN, domain, master_ip], capture_output=True, text=True, timeout=15)
+        if r.returncode == 1:
+            logger.info("[~] Zone %s is mastered by %s, not this server — delete skipped", domain, r.stdout.strip())
+            return True
+        if r.returncode == 4:
+            logger.error("[!] Zone %s owner check skipped: api_url/api_key/master_ip missing in config, queued WITHOUT check", domain)
+    except Exception:
+        pass
     logger.info("[-] Removing zone: %s", domain)
-    result = api_request(config, "DELETE", f"/api/zones/{zone['id']}")
-    if result and result.get("_status"):
-        logger.error("    Error (%s): %s", result.get("_status"), result.get("error", str(result)))
-        return False
-    logger.info("    Done.")
-    return True
+    return queue_op("delete", domain, master_ip)
 
 
 def get_cyberpanel_domains():
@@ -194,38 +224,7 @@ def get_cyberpanel_domains():
     return domains
 
 
-def sync(config):
-    local_domains = set(get_cyberpanel_domains())
-    remote_zones = list_zones(config)
-    remote_domains = {z["name"].rstrip("."): z for z in remote_zones}
 
-    logger.info("Local domains: %d, Remote zones: %d", len(local_domains), len(remote_domains))
-
-    added = 0
-    for domain in sorted(local_domains - set(remote_domains.keys())):
-        if add_zone(config, domain):
-            added += 1
-
-    removed = 0
-    for domain in sorted(set(remote_domains.keys()) - local_domains):
-        if remove_zone(config, domain):
-            removed += 1
-
-    logger.info("Sync complete: +%d added, -%d removed", added, removed)
-
-
-def cmd_list(config):
-    zones = list_zones(config)
-    if not zones:
-        print("No zones found.")
-        return
-    print(f"{'Name':<40} {'Status':<10} {'Master IP':<18} {'Last Sync'}")
-    print("-" * 90)
-    for z in zones:
-        print(f"{z['name']:<40} {z.get('status','?'):<10} {z.get('masterIp','?'):<18} {z.get('lastSync','never')}")
-
-
-# --- Django signal handlers (used when loaded as CyberPanel plugin) ---
 
 def _extract_domain(request, response=None):
     """Extract domain name from CyberPanel request/response."""
@@ -296,6 +295,13 @@ def on_zone_created(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Zone created: %s", domain)
+        # The panel's tables are latin1 and PowerDNS stores ASCII: a Unicode
+        # name raises "Illegal mix of collations" rather than simply missing.
+        ascii_domain, reason = canonical_domain(domain)
+        if not ascii_domain:
+            logger.warning("Refusing zone %s: %s", domain, reason)
+            return 200
+        domain = ascii_domain
         _set_zone_master(domain)
         try:
             from django.db import connection
@@ -328,12 +334,14 @@ def on_zone_created(sender, **kwargs):
 
 
 def _domain_has_website(domain):
-    """Check if domain belongs to an existing website in CyberPanel."""
+    """Whether a website still uses this domain. "Yes" when it cannot tell: the
+    caller removes the zone on "no", and a failed query is not evidence."""
     try:
         from websiteFunctions.models import Websites
         return Websites.objects.filter(domain=domain).exists()
-    except Exception:
-        return False
+    except Exception as e:
+        logger.warning("Cannot tell whether %s still has a website (%s) — keeping the zone", domain, e)
+        return True
 
 
 def on_website_deleted(sender, **kwargs):
@@ -347,6 +355,11 @@ def on_website_deleted(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Website deleted: %s", domain)
+        ascii_domain, reason = canonical_domain(domain)
+        if not ascii_domain:
+            logger.warning("Refusing to act on zone %s: %s", domain, reason)
+            return 200
+        domain = ascii_domain
         config = load_config()
         if config:
             remove_zone(config, domain)
@@ -365,6 +378,13 @@ def on_dns_zone_deleted(sender, **kwargs):
         domain = _extract_domain(request, response)
         if not domain:
             return 200
+        # ASCII before the lookup: a Unicode name makes the query raise, and
+        # the answer decides whether a live zone is removed.
+        ascii_domain, reason = canonical_domain(domain)
+        if not ascii_domain:
+            logger.warning("Refusing to act on zone %s: %s", domain, reason)
+            return 200
+        domain = ascii_domain
         if _domain_has_website(domain):
             logger.info("DNS zone deleted but website exists for %s — keeping on secondary", domain)
             return 200
@@ -481,15 +501,7 @@ def main():
     if not config:
         sys.exit(1)
 
-    if cmd == "add" and len(sys.argv) >= 3:
-        add_zone(config, sys.argv[2])
-    elif cmd == "remove" and len(sys.argv) >= 3:
-        remove_zone(config, sys.argv[2])
-    elif cmd == "sync":
-        sync(config)
-    elif cmd == "list":
-        cmd_list(config)
-    elif cmd == "ensure-signals":
+    if cmd == "ensure-signals":
         ensure_signals()
     else:
         print(__doc__)

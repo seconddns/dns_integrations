@@ -13,9 +13,9 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
 [ -f "$CONFIG" ] || exit 0
 
-API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url\s*=\s*//')
-API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key\s*=\s*//')
-MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
+API_URL=$(grep "^api_url" "$CONFIG" | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+API_KEY=$(grep "^api_key" "$CONFIG" | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
+MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip[[:space:]]*=[[:space:]]*//')
 
 [ -z "$API_URL" ] || [ -z "$API_KEY" ] || [ -z "$MASTER_IP" ] && exit 0
 
@@ -23,29 +23,25 @@ MASTER_IP=$(grep "^master_ip" "$CONFIG" | sed 's/^master_ip\s*=\s*//')
 ZONE_NAME="${NEW_DOMAIN_ALIAS_NAME:-$NEW_DOMAIN_NAME}"
 [ -z "$ZONE_NAME" ] && exit 0
 
-log "Zone created: $ZONE_NAME (plesk event handler)"
-
-# Convert IDN to Punycode if idn2/idn is available
-if command -v idn2 &>/dev/null; then
-    ZONE_NAME=$(idn2 --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
-elif command -v idn &>/dev/null; then
-    ZONE_NAME=$(idn --quiet "$ZONE_NAME" 2>/dev/null || echo "$ZONE_NAME")
+DOMAIN_LIB="/usr/local/bin/seconddns-domain"
+[ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
+SECONDDNS_DOMAIN_LIB=1 . "$DOMAIN_LIB"
+RAW_NAME="$ZONE_NAME"
+if ! canonical_domain "$ZONE_NAME"; then
+    log "[!] Zone '$ZONE_NAME' refused: $DOMAIN_ERROR (plesk event handler)"
+    exit 0
 fi
-# If neither is available, the domain name is sent as-is (API will handle it)
+ZONE_NAME="$DOMAIN"
+# keep what the panel actually handed over, for later diagnosis
+RAW_NOTE=""; [ "$RAW_NAME" != "$ZONE_NAME" ] && RAW_NOTE=" (received as '$RAW_NAME')"
 
-# Add zone to SecondDNS
-response=$(curl -sf --max-time 15 \
-    -X POST \
-    -H "X-API-Key: $API_KEY" \
-    -H "Content-Type: application/json" \
-    -H "User-Agent: SecondDNS-Plesk/1.0" \
-    -d "{\"name\":\"$ZONE_NAME\",\"masterIp\":\"$MASTER_IP\"}" \
-    "$API_URL/api/zones" 2>/dev/null)
+log "Zone created: $ZONE_NAME (plesk event handler)$RAW_NOTE"
 
-if [ $? -eq 0 ]; then
-    log "[+] Zone $ZONE_NAME added to SecondDNS"
+QUEUE="/usr/local/bin/seconddns-queue"
+if "$QUEUE" enqueue create "$ZONE_NAME" "$MASTER_IP"; then
+    log "[>] Zone $ZONE_NAME queued for SecondDNS"
 else
-    log "[!] Failed to add zone $ZONE_NAME to SecondDNS"
+    log "[!] Zone $ZONE_NAME NOT queued (seconddns-queue failed)"
 fi
 
 exit 0

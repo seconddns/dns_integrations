@@ -61,8 +61,8 @@ done
 ZONE_TEMPLATE_DIR="/var/cpanel/zonetemplates"
 CONFIG="/etc/seconddns.conf"
 if [ -d "$ZONE_TEMPLATE_DIR" ]; then
-    API_URL_CONF=$(grep "^api_url" "$CONFIG" 2>/dev/null | sed 's/^api_url\s*=\s*//')
-    API_KEY_CONF=$(grep "^api_key" "$CONFIG" 2>/dev/null | sed 's/^api_key\s*=\s*//')
+    API_URL_CONF=$(grep "^api_url" "$CONFIG" 2>/dev/null | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+    API_KEY_CONF=$(grep "^api_key" "$CONFIG" 2>/dev/null | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
     API_NS_CONF=""
     if [ -n "$API_URL_CONF" ] && [ -n "$API_KEY_CONF" ]; then
         API_NS_CONF=$(curl -sf --max-time 10 \
@@ -100,3 +100,14 @@ echo "=== Uninstall complete ==="
 echo ""
 echo "  Note: AXFR settings in WHM and BIND config must be removed manually."
 echo "  Verify: $HOOKS_BIN list"
+
+# Remove offline queue
+systemctl disable --now seconddns-queued.service 2>/dev/null
+rm -f /etc/systemd/system/seconddns-queued.service
+systemctl daemon-reload 2>/dev/null
+rm -f /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns_common.py /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+if [ -f /var/lib/seconddns/queue.db ] && command -v sqlite3 &>/dev/null; then
+    n=$(sqlite3 /var/lib/seconddns/queue.db "SELECT COUNT(*) FROM ops WHERE status='pending';" 2>/dev/null || echo 0)
+    [ "${n:-0}" -gt 0 ] && echo "[!] Discarding $n pending zone operation(s) that were never delivered to SecondDNS"
+fi
+rm -rf /var/lib/seconddns

@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+"""Re-point SecondDNS zones to this server after a panel migration.
+
+Lists the zones of the subscription, picks those this panel's DNS server
+masters (default) or all of them (--all), and changes masterIp to this
+server's address via PATCH. Dry run by default; --apply makes the change.
+
+  seconddns-migrate-master [--apply] [--all | --from-file FILE]
+                           [--master-ip IP] [--config PATH]
+
+masterIp comes from /etc/seconddns.conf; --master-ip overrides it.
+Exit 0 = nothing failed, 1 = at least one PATCH or lookup failed.
+"""
+import argparse
+import os
+import signal
+import sys
+
+# piping into head/grep must not end in a BrokenPipeError traceback
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from seconddns_common import api, load_config, panel_zones, zones_from_file, canonical_targets  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true", help="make the change (default: dry run)")
+    ap.add_argument("--all", action="store_true", help="every zone of the subscription, not only those on this panel")
+    ap.add_argument("--from-file", metavar="FILE", help="domain list, one per line, instead of asking the panel")
+    ap.add_argument("--master-ip", metavar="IP", help="override master_ip from the config")
+    ap.add_argument("--config", default=os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf"))
+    a = ap.parse_args()
+
+    cfg = load_config(a.config)
+    my = a.master_ip or cfg["master_ip"]
+    if not my:
+        sys.exit("master_ip missing: set it in the config or pass --master-ip")
+
+    code, zones = api(cfg, "GET", "/api/zones", ua="SecondDNS-MigrateMaster/1.0")
+    if code != 200 or not isinstance(zones, list):
+        sys.exit(f"GET /api/zones failed: HTTP {code} {zones.get('error', '') if isinstance(zones, dict) else ''}")
+    by_name = {z["name"]: z for z in zones}
+
+    skipped = []
+    if a.all:
+        targets = sorted(by_name)
+    else:
+        raw = zones_from_file(a.from_file) if a.from_file else panel_zones()
+        targets, skipped = canonical_targets(raw)
+
+    to_change, already, absent = [], [], []
+    for name in targets:
+        z = by_name.get(name)
+        if z is None:
+            absent.append(name)
+        elif z.get("masterIp") == my:
+            already.append(name)
+        else:
+            to_change.append(z)
+
+    mode = "APPLY" if a.apply else "DRY RUN"
+    print(f"[{mode}] target masterIp {my}; {len(zones)} zone(s) in SecondDNS, {len(targets)} considered")
+    failed = 0
+    for z in to_change:
+        line = f"  {z['name']}: {z.get('masterIp')} -> {my}"
+        if a.apply:
+            code, resp = api(cfg, "PATCH", f"/api/zones/{z['id']}", {"masterIp": my}, ua="SecondDNS-MigrateMaster/1.0")
+            if code == 200:
+                print(line + "  [changed]")
+            else:
+                failed += 1
+                print(line + f"  [FAILED HTTP {code} {resp.get('error', '')}]")
+        else:
+            print(line)
+    print(f"[{mode}] {len(to_change)} to change, {len(already)} already {my}, "
+          f"{len(absent)} not in SecondDNS, {len(skipped)} invalid name(s)"
+          + (f", {failed} failed" if failed else ""))
+    for name in absent:
+        print(f"  not in SecondDNS: {name}")
+    for name, why in skipped:
+        print(f"  invalid name: {name} ({why})")
+    if not a.apply and to_change:
+        print("re-run with --apply to make the change")
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()
