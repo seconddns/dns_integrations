@@ -152,6 +152,12 @@ def send_wakeup():
 def db():
     os.makedirs(os.path.dirname(QDB), exist_ok=True)
     conn = sqlite3.connect(QDB, timeout=5)
+    # SQLite gives -wal and -shm the mode of the database file, so whoever
+    # creates it decides whether the panel's web user can enqueue at all.
+    try:
+        os.chmod(QDB, os.stat(QDB).st_mode | 0o060)
+    except OSError:
+        pass
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     return conn

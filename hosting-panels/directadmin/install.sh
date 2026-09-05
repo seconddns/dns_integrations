@@ -186,9 +186,7 @@ curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_
 chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
-if ! command -v sqlite3 &>/dev/null; then
-    echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
-fi
+bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")
 systemctl daemon-reload
 systemctl enable --now seconddns-queued.service
 echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
