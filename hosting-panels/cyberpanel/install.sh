@@ -55,7 +55,7 @@ fi
 # Clone repo to temp dir for fresh files
 REPO_URL="https://github.com/seconddns/dns_integrations.git"
 WORK_DIR=$(mktemp -d)
-CYBER_SRC="$WORK_DIR/dns_integrations/cyberpanel"
+CYBER_SRC="$WORK_DIR/dns_integrations/hosting-panels/cyberpanel"
 
 if [ -f "seconddns.py" ]; then
     # Running from local clone
