@@ -7,13 +7,9 @@ CyberPanel integration for secondary DNS service.
 
 Works in two modes:
   1. Django signal plugin — hooks into CyberPanel's postWebsiteCreation/Deletion signals
-  2. CLI — manual add/remove/sync/list commands
+  2. ensure-signals — re-register the Django signal handlers after a restart
 
-CLI usage:
-  seconddns add <domain>       — Register domain as secondary zone
-  seconddns remove <domain>    — Remove domain from secondary DNS
-  seconddns sync               — Sync all CyberPanel domains with secondary DNS
-  seconddns list               — List zones on secondary DNS
+Zone management from the command line is `seconddns`, shared by every panel.
 
 Configuration: /etc/seconddns.conf
 """
@@ -228,38 +224,7 @@ def get_cyberpanel_domains():
     return domains
 
 
-def sync(config):
-    local_domains = set(get_cyberpanel_domains())
-    remote_zones = list_zones(config)
-    remote_domains = {z["name"].rstrip("."): z for z in remote_zones}
 
-    logger.info("Local domains: %d, Remote zones: %d", len(local_domains), len(remote_domains))
-
-    added = 0
-    for domain in sorted(local_domains - set(remote_domains.keys())):
-        if add_zone(config, domain):
-            added += 1
-
-    removed = 0
-    for domain in sorted(set(remote_domains.keys()) - local_domains):
-        if remove_zone(config, domain):
-            removed += 1
-
-    logger.info("Sync complete: +%d added, -%d removed", added, removed)
-
-
-def cmd_list(config):
-    zones = list_zones(config)
-    if not zones:
-        print("No zones found.")
-        return
-    print(f"{'Name':<40} {'Status':<10} {'Master IP':<18} {'Last Sync'}")
-    print("-" * 90)
-    for z in zones:
-        print(f"{z['name']:<40} {z.get('status','?'):<10} {z.get('masterIp','?'):<18} {z.get('lastSync','never')}")
-
-
-# --- Django signal handlers (used when loaded as CyberPanel plugin) ---
 
 def _extract_domain(request, response=None):
     """Extract domain name from CyberPanel request/response."""
@@ -536,15 +501,7 @@ def main():
     if not config:
         sys.exit(1)
 
-    if cmd == "add" and len(sys.argv) >= 3:
-        add_zone(config, sys.argv[2])
-    elif cmd == "remove" and len(sys.argv) >= 3:
-        remove_zone(config, sys.argv[2])
-    elif cmd == "sync":
-        sync(config)
-    elif cmd == "list":
-        cmd_list(config)
-    elif cmd == "ensure-signals":
+    if cmd == "ensure-signals":
         ensure_signals()
     else:
         print(__doc__)

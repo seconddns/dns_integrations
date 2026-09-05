@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+"""Manage this server's zones in SecondDNS.
+
+  seconddns list                 zones in SecondDNS, with status and master
+  seconddns status               queue state: pending / failed / oldest / last error
+  seconddns status <domain>      one zone: known here, mastered by whom, last sync
+  seconddns add <domain>         register a zone
+  seconddns remove <domain>      remove a zone
+  seconddns sync                 register every panel zone SecondDNS does not have
+  seconddns sync --prune         also remove zones this panel no longer serves
+  seconddns remove-all           remove every zone mastered by this server
+
+Changes go through seconddns-queue, so they carry retry, FIFO order and the
+delete-side ownership check. Deleting is never implicit: plain `sync` only
+adds, `--prune` is refused when it would drop more than half of this server's
+zones, and `remove-all` asks before doing anything.
+
+Exit 0 = done, 1 = something failed, 2 = refused.
+"""
+import argparse
+import os
+import signal
+import subprocess
+import sys
+
+# piping into head/grep must not end in a BrokenPipeError traceback
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from seconddns_common import (  # noqa: E402
+    api, load_config, panel_zones, canonical, canonical_targets, enqueue, PanelError, QUEUE_BIN,
+)
+
+UA = "SecondDNS-CLI/1.0"
+
+
+def fetch_zones(cfg):
+    code, zones = api(cfg, "GET", "/api/zones", ua=UA)
+    if code != 200 or not isinstance(zones, list):
+        why = zones.get("error", "") if isinstance(zones, dict) else ""
+        sys.exit(f"GET /api/zones failed: HTTP {code} {why}")
+    return zones
+
+
+def resolve(name):
+    """Panel input to the canonical zone name, or exit with the reason."""
+    canonical_name, reason = canonical(name)
+    if reason:
+        sys.exit(f"{name}: {reason}")
+    return canonical_name
+
+
+def cmd_list(cfg, _a):
+    zones = fetch_zones(cfg)
+    if not zones:
+        print("No zones in SecondDNS for this account.")
+        return 0
+    print(f"{'Name':<40} {'Status':<10} {'Master':<18} Last sync")
+    print("-" * 90)
+    for z in sorted(zones, key=lambda z: z["name"]):
+        print(f"{z['name']:<40} {z.get('status', '?'):<10} {z.get('masterIp', '?'):<18} {z.get('lastSync') or 'never'}")
+    return 0
+
+
+def cmd_status(cfg, a):
+    if a.domain:
+        name = resolve(a.domain)
+        zone = next((z for z in fetch_zones(cfg) if z["name"] == name), None)
+        if zone is None:
+            print(f"{name}: not in SecondDNS")
+            return 1
+        mine = zone.get("masterIp") == cfg["master_ip"]
+        print(f"{name}: {zone.get('status', '?')}, mastered by {zone.get('masterIp', '?')}"
+              f"{'' if mine else ' (not this server)'}, last sync {zone.get('lastSync') or 'never'}")
+        return 0
+    # no domain: the queue is what an operator is asking about
+    return subprocess.run([QUEUE_BIN, "status"]).returncode
+
+
+def cmd_add(cfg, a):
+    name = resolve(a.domain)
+    if enqueue("create", name, cfg["master_ip"]):
+        print(f"queued: create {name}")
+        return 0
+    print(f"could not queue: create {name}", file=sys.stderr)
+    return 1
+
+
+def cmd_remove(cfg, a):
+    name = resolve(a.domain)
+    if enqueue("delete", name, cfg["master_ip"]):
+        print(f"queued: delete {name}")
+        return 0
+    print(f"could not queue: delete {name}", file=sys.stderr)
+    return 1
+
+
+def cmd_sync(cfg, a):
+    try:
+        raw = panel_zones()
+    except PanelError as e:
+        sys.exit(str(e))
+    panel, skipped = canonical_targets(raw)
+    if raw and not panel:
+        sys.exit("the panel's zone names are all unusable; refusing to continue")
+    for name, why in skipped:
+        print(f"[!] skipped {name}: {why}", file=sys.stderr)
+
+    zones = fetch_zones(cfg)
+    have = {z["name"] for z in zones}
+    mine = [z for z in zones if z.get("masterIp") == cfg["master_ip"]]
+
+    missing = [n for n in panel if n not in have]
+    failed = 0
+    for n in missing:
+        if enqueue("create", n, cfg["master_ip"]):
+            print(f"queued: create {n}")
+        else:
+            print(f"could not queue: create {n}", file=sys.stderr); failed += 1
+
+    pruned = []
+    if a.prune:
+        panel_set = set(panel)
+        stale = [z for z in mine if z["name"] not in panel_set]
+        # an unreadable or half-read panel looks exactly like "everything is gone"
+        if stale and len(stale) * 2 > len(mine):
+            msg = (f"--prune would remove {len(stale)} of {len(mine)} zone(s) mastered by this server; "
+                   "that looks like a wrong zone list, not a cleanup")
+            if not a.force:
+                print(msg + ". Check `seconddns list`; --force overrides.", file=sys.stderr)
+                return 2
+            print("[!] " + msg + " — proceeding on --force", file=sys.stderr)
+        for z in stale:
+            if enqueue("delete", z["name"], cfg["master_ip"]):
+                print(f"queued: delete {z['name']}"); pruned.append(z["name"])
+            else:
+                print(f"could not queue: delete {z['name']}", file=sys.stderr); failed += 1
+
+    print(f"\n{len(missing)} to add, {len(pruned)} to remove, {failed} failed")
+    return 1 if failed else 0
+
+
+def cmd_remove_all(cfg, a):
+    mine = [z for z in fetch_zones(cfg) if z.get("masterIp") == cfg["master_ip"]]
+    if not mine:
+        print("No zones mastered by this server.")
+        return 0
+    print(f"This removes {len(mine)} zone(s) mastered by {cfg['master_ip']} from SecondDNS:")
+    for z in sorted(mine, key=lambda z: z["name"])[:10]:
+        print(f"  {z['name']}")
+    if len(mine) > 10:
+        print(f"  ... and {len(mine) - 10} more")
+    print("Your DNS server keeps them; only the secondary copies go.")
+    if not a.yes:
+        if not sys.stdin.isatty():
+            print("Refusing without a terminal to confirm on; pass --yes if you mean it.", file=sys.stderr)
+            return 2
+        if input("Type the master IP to confirm: ").strip() != cfg["master_ip"]:
+            print("Not confirmed; nothing done.", file=sys.stderr)
+            return 2
+    failed = 0
+    for z in mine:
+        if enqueue("delete", z["name"], cfg["master_ip"]):
+            print(f"queued: delete {z['name']}")
+        else:
+            print(f"could not queue: delete {z['name']}", file=sys.stderr); failed += 1
+    return 1 if failed else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", default=os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf"))
+    sub = ap.add_subparsers(dest="cmd")
+
+    sub.add_parser("list")
+    p = sub.add_parser("status"); p.add_argument("domain", nargs="?")
+    p = sub.add_parser("add"); p.add_argument("domain")
+    p = sub.add_parser("remove"); p.add_argument("domain")
+    p = sub.add_parser("sync")
+    p.add_argument("--prune", action="store_true", help="also remove zones this panel no longer serves")
+    p.add_argument("--force", action="store_true", help="allow --prune to drop more than half of this server's zones")
+    p = sub.add_parser("remove-all"); p.add_argument("--yes", action="store_true", help="skip the confirmation")
+
+    a = ap.parse_args()
+    if not a.cmd:
+        ap.print_help()
+        return 2
+
+    cfg = load_config(a.config)
+    if not cfg["master_ip"]:
+        sys.exit("master_ip missing in the config")
+
+    return {
+        "list": cmd_list, "status": cmd_status, "add": cmd_add, "remove": cmd_remove,
+        "sync": cmd_sync, "remove-all": cmd_remove_all,
+    }[a.cmd](cfg, a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

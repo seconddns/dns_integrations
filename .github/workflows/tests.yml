@@ -53,6 +53,9 @@ jobs:
       - name: test_ip_detection.sh
         run: bash hosting-panels/common/tests/test_ip_detection.sh
 
+      - name: test_cli.sh
+        run: bash hosting-panels/common/tests/test_cli.sh
+
       - name: test_cyberpanel_db.sh
         run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
 
