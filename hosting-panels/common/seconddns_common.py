@@ -102,6 +102,34 @@ def _cyberpanel_db():
     return field("USER", "DB_USER"), field("PASSWORD", "DB_PASSWORD"), field("NAME", "DB_NAME")
 
 
+def _cyberpanel_logins():
+    """Ways to reach CyberPanel's database, best first. The settings file is
+    last: its DB_PASSWORD default is not what the database was given, so those
+    credentials are refused on a current install."""
+    creds = _cyberpanel_db()
+    name = (creds[2] if creds else None) or "cyberpanel"
+    logins = [(["mysql", name], None)]                       # /root/.my.cnf
+    try:
+        with open("/etc/cyberpanel/mysqlPassword") as f:
+            logins.append((["mysql", "-u", "root", name], f.read().strip()))
+    except OSError:
+        pass
+    if creds and creds[0] and creds[1]:
+        logins.append((["mysql", "-u", creds[0], name], creds[1]))
+    return logins
+
+
+def _cyberpanel_query(sql):
+    """First login that answers wins; None when none of them do."""
+    for cmd, pw in _cyberpanel_logins():
+        # password through the environment, never argv: argv is visible in ps
+        env = {**os.environ, "MYSQL_PWD": pw} if pw else None
+        out = _run(cmd + ["-Ne", sql], env=env)
+        if out is not None:
+            return out
+    return None
+
+
 def panel_zones():
     """Names of the DNS zones this panel's DNS server masters — the same set
     the hooks act on. A panel that cannot be read is an error, never an
@@ -129,13 +157,7 @@ def panel_zones():
             out = None
         source = "/var/named/*.db"
     elif os.path.isdir("/usr/local/CyberCP"):
-        creds = _cyberpanel_db()
-        out = None
-        if creds and all(creds):
-            user, pw, name = creds
-            # password via the environment, not argv: argv is visible in ps
-            out = _run(["mysql", "-u", user, name, "-Ne", "SELECT name FROM domains"],
-                       env={**os.environ, "MYSQL_PWD": pw})
+        out = _cyberpanel_query("SELECT name FROM domains")
         source = "CyberPanel PowerDNS domains"
     else:
         raise PanelError("could not detect the panel; use --from-file")
