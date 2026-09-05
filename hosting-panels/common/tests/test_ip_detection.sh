@@ -1,6 +1,6 @@
 #!/bin/bash
-# detect_v4/detect_v6 in every panel installer: the kernel's route names the
-# source address, and an outside echo service is a fallback, never the verdict.
+# detect_v4/detect_v6 in every installer: the route names the source address,
+# and an echo service is a fallback, never the verdict.
 # Run: bash hosting-panels/common/tests/test_ip_detection.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
