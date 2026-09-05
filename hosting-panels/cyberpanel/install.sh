@@ -237,9 +237,7 @@ cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.s
 chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
-if ! command -v sqlite3 &>/dev/null; then
-    echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
-fi
+bash "$COMMON_SRC/install-sqlite.sh"
 systemctl daemon-reload
 systemctl enable --now seconddns-queued.service
 echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
