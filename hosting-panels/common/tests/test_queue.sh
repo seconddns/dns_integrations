@@ -120,6 +120,9 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
 PYEOF
 MOCK_PID=$!
+# job control otherwise announces the kill below by echoing the whole command,
+# heredoc body included, after the summary line
+disown $MOCK_PID 2>/dev/null || true
 trap 'kill $MOCK_PID 2>/dev/null; rm -rf "$TMP"' EXIT
 sleep 1
 
