@@ -330,6 +330,14 @@ def on_zone_created(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Zone created: %s", domain)
+        # PowerDNS stores zones in ASCII and its tables are latin1: comparing a
+        # Unicode name against them raises "Illegal mix of collations", not a
+        # miss.
+        ascii_domain, reason = canonical_domain(domain)
+        if not ascii_domain:
+            logger.warning("Refusing zone %s: %s", domain, reason)
+            return 200
+        domain = ascii_domain
         _set_zone_master(domain)
         try:
             from django.db import connection
@@ -381,6 +389,7 @@ def on_website_deleted(sender, **kwargs):
         if not domain:
             return 200
         logger.info("Website deleted: %s", domain)
+        domain = canonical_domain(domain)[0] or domain
         config = load_config()
         if config:
             remove_zone(config, domain)
@@ -399,6 +408,14 @@ def on_dns_zone_deleted(sender, **kwargs):
         domain = _extract_domain(request, response)
         if not domain:
             return 200
+        # ASCII before the lookup: the panel's tables are latin1, and a Unicode
+        # name makes the query raise, which this reads as "no website" and then
+        # removes a zone that is still in use.
+        ascii_domain, reason = canonical_domain(domain)
+        if not ascii_domain:
+            logger.warning("Refusing to act on zone %s: %s", domain, reason)
+            return 200
+        domain = ascii_domain
         if _domain_has_website(domain):
             logger.info("DNS zone deleted but website exists for %s — keeping on secondary", domain)
             return 200
