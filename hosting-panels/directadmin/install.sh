@@ -59,13 +59,12 @@ confirm() {
 }
 
 valid_ip() {
-    case "$1" in
-        "") return 1 ;;
-        *:*) echo "$1" | grep -qE '^[0-9A-Fa-f:]+$' ;;
-        *)  echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
-            local IFS=. o
-            for o in $1; do [ "$o" -le 255 ] || return 1; done ;;
-    esac
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
 }
 
 echo "=== SecondDNS DirectAdmin Integration ==="
@@ -189,7 +188,7 @@ echo "[+] Log file: $LOG_FILE"
 # Install hooks
 mkdir -p "$HOOKS_DIR"
 
-for hook in dns_create_post.sh dns_delete_post.sh; do
+for hook in dns_create_post.sh dns_delete_post.sh domain_change_post.sh; do
     curl -sf --max-time 10 -o "$HOOKS_DIR/$hook" "$REPO_URL/$hook?t=$(date +%s)"
     chmod +x "$HOOKS_DIR/$hook"
     echo "[+] Installed hook: $HOOKS_DIR/$hook"
@@ -450,7 +449,8 @@ echo ""
 echo "  Config:  $CONFIG_FILE"
 echo "  Hooks:   $HOOKS_DIR/dns_create_post.sh"
 echo "           $HOOKS_DIR/dns_delete_post.sh"
+echo "           $HOOKS_DIR/domain_change_post.sh"
 echo "  Logs:    tail -f $LOG_FILE"
 echo ""
-echo "  Domains created/deleted in DirectAdmin will be"
+echo "  Domains created, renamed or deleted in DirectAdmin will be"
 echo "  automatically synced to your secondary DNS."

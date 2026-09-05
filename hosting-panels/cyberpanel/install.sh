@@ -83,13 +83,12 @@ confirm() {
 }
 
 valid_ip() {
-    case "$1" in
-        "") return 1 ;;
-        *:*) echo "$1" | grep -qE '^[0-9A-Fa-f:]+$' ;;
-        *)  echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
-            local IFS=. o
-            for o in $1; do [ "$o" -le 255 ] || return 1; done ;;
-    esac
+    [ -n "$1" ] || return 1
+    # python3 is already a hard dependency of this installer and of the queue
+    # worker, and its parser is the address grammar, not an approximation of it
+    python3 -c 'import ipaddress,sys
+try: ipaddress.ip_address(sys.argv[1])
+except ValueError: sys.exit(1)' "$1" 2>/dev/null
 }
 
 echo "=== SecondDNS CyberPanel Integration ==="
