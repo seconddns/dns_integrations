@@ -103,9 +103,8 @@ def _cyberpanel_db():
 
 
 def _cyberpanel_logins():
-    """Ways to reach CyberPanel's database, best first. The settings file is
-    last: its DB_PASSWORD default is not what the database was given, so those
-    credentials are refused on a current install."""
+    """Ways in, best first: the settings file is last because its DB_PASSWORD
+    default is not what a current CyberPanel gave the database."""
     creds = _cyberpanel_db()
     name = (creds[2] if creds else None) or "cyberpanel"
     logins = [(["mysql", name], None)]                       # /root/.my.cnf
