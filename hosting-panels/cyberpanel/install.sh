@@ -425,6 +425,19 @@ if [ "$DOMAIN_COUNT" -gt 0 ]; then
 fi
 
 echo ""
+# Initial fill: reconcile already knows where each panel keeps its zone list,
+# so the installer does not carry a fourth copy of that. --add-missing only:
+# zones in SecondDNS that are not on this panel are left untouched here.
+if confirm "Queue existing zones for delivery to secondary DNS now?"; then
+    echo "[*] Syncing zones..."
+    if /usr/local/bin/seconddns-reconcile --add-missing --apply; then
+        echo "    Delivery runs in the background: seconddns-queue status"
+    else
+        echo "[!] Initial sync incomplete — rerun: seconddns-reconcile --add-missing --apply"
+    fi
+fi
+
+echo ""
 echo "=== Installation complete ==="
 echo ""
 echo "  Config:  $CONFIG_FILE"
