@@ -67,6 +67,13 @@ try: ipaddress.ip_address(sys.argv[1])
 except ValueError: sys.exit(1)' "$1" 2>/dev/null
 }
 
+# valid_ip and the server-info parsing below both need it; without this check a
+# missing python3 turns the IP prompt into an endless "not an address" loop
+command -v python3 >/dev/null 2>&1 || {
+    echo "[!] python3 is required by this installer — install it and rerun"
+    exit 1
+}
+
 echo "=== SecondDNS DirectAdmin Integration ==="
 echo ""
 
