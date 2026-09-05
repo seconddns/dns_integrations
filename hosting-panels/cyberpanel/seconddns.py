@@ -369,9 +369,8 @@ def on_zone_created(sender, **kwargs):
 
 
 def _domain_has_website(domain):
-    """Whether a website still uses this domain. Answers "yes" when it cannot
-    tell: the caller removes the zone on "no", and a lost database connection
-    is not evidence that the customer stopped using it."""
+    """Whether a website still uses this domain. "Yes" when it cannot tell: the
+    caller removes the zone on "no", and a failed query is not evidence."""
     try:
         from websiteFunctions.models import Websites
         return Websites.objects.filter(domain=domain).exists()
