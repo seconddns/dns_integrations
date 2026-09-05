@@ -324,7 +324,7 @@ if [ -n "$PDNS_CONF" ]; then
     fi
 
     if [ -z "$DNS_IPS" ]; then
-        DNS_IPS=$(grep -E "^dns_ips\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips\s*=\s*//' | tr -d ' ')
+        DNS_IPS=$(grep -E "^dns_ips[[:space:]]*=" "$CONFIG_FILE" 2>/dev/null | sed 's/^dns_ips[[:space:]]*=[[:space:]]*//' | tr -d ' ')
         [ -z "$DNS_IPS" ] && read -p "    Enter secondary DNS IP: " DNS_IPS < /dev/tty
     fi
 

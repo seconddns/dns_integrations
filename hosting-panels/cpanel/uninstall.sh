@@ -61,8 +61,8 @@ done
 ZONE_TEMPLATE_DIR="/var/cpanel/zonetemplates"
 CONFIG="/etc/seconddns.conf"
 if [ -d "$ZONE_TEMPLATE_DIR" ]; then
-    API_URL_CONF=$(grep "^api_url" "$CONFIG" 2>/dev/null | sed 's/^api_url\s*=\s*//')
-    API_KEY_CONF=$(grep "^api_key" "$CONFIG" 2>/dev/null | sed 's/^api_key\s*=\s*//')
+    API_URL_CONF=$(grep "^api_url" "$CONFIG" 2>/dev/null | sed 's/^api_url[[:space:]]*=[[:space:]]*//')
+    API_KEY_CONF=$(grep "^api_key" "$CONFIG" 2>/dev/null | sed 's/^api_key[[:space:]]*=[[:space:]]*//')
     API_NS_CONF=""
     if [ -n "$API_URL_CONF" ] && [ -n "$API_KEY_CONF" ]; then
         API_NS_CONF=$(curl -sf --max-time 10 \

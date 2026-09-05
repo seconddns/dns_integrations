@@ -283,7 +283,7 @@ if [ -n "$DNS_IPS" ]; then
                 fi
             fi
         elif [ "$IP_PREFERENCE" = "v4" ]; then
-            if grep -q 'listen-on\s' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
+            if grep -q 'listen-on[[:space:]]' "$NAMED_OPTIONS" 2>/dev/null && ! grep -q 'listen-on-v6' "$NAMED_OPTIONS" 2>/dev/null; then
                 if grep -q 'listen-on.*none' "$NAMED_OPTIONS" 2>/dev/null; then
                     echo "[!] WARNING: BIND has listen-on set to none — IPv4 disabled"
                 fi
@@ -372,8 +372,8 @@ if [ -n "$DNS_IPS" ]; then
                     if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
                         cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
                         # Remove 'none;' if present, then add our IP
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to allow-transfer"
                     fi
                 fi
@@ -382,7 +382,7 @@ if [ -n "$DNS_IPS" ]; then
                 if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
                     cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
                     # Add before closing }; of options block
-                    sed -i "/^options\s*{/,/^};/ {
+                    sed -i "/^options[[:space:]]*{/,/^};/ {
                         /^};/ i\\
 \\tallow-transfer { $SECONDARY_IP; };\\
 \\talso-notify { $SECONDARY_IP; };
@@ -396,14 +396,14 @@ if [ -n "$DNS_IPS" ]; then
                 if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
                     echo "[!] also-notify does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to also-notify?"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "/also-notify/s|\s*none\s*;||g" "$NAMED_OPTIONS"
+                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "/also-notify/s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to also-notify"
                     fi
                 fi
             else
                 if confirm "Add also-notify for $SECONDARY_IP?"; then
-                    sed -i "/^options\s*{/,/^};/ {
+                    sed -i "/^options[[:space:]]*{/,/^};/ {
                         /^};/ i\\
 \\talso-notify { $SECONDARY_IP; };
                     }" "$NAMED_OPTIONS"
