@@ -239,17 +239,19 @@ bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 bash "$COMMON_SRC/install-sqlite.sh"
 
-# The signal handler runs inside CyberPanel's web process, not as root: without
-# this the hook fires, the enqueue fails, and the zone never leaves the panel.
-PANEL_USER=$(ps -eo user,comm | awk '$2=="lscpd" && $1!="root" {print $1; exit}')
+# The handler runs in the Django process, which belongs to cyberpanel, not in
+# lscpd and not as root: without this the enqueue fails and the zone stays.
+PANEL_USER=$(ps -eo user:32,args | awk '/[C]yberCP/ && $1!="root" {print $1; exit}')
+[ -z "$PANEL_USER" ] && getent passwd cyberpanel >/dev/null 2>&1 && PANEL_USER=cyberpanel
 PANEL_USER=${PANEL_USER:-lscpd}
+PANEL_GROUP=$(id -gn "$PANEL_USER" 2>/dev/null || echo "$PANEL_USER")
 if getent passwd "$PANEL_USER" >/dev/null 2>&1; then
-    chgrp -R "$PANEL_USER" /var/lib/seconddns 2>/dev/null
+    chgrp -R "$PANEL_GROUP" /var/lib/seconddns 2>/dev/null
     chmod 2770 /var/lib/seconddns 2>/dev/null
     find /var/lib/seconddns -type f -exec chmod 660 {} + 2>/dev/null
-    chgrp "$PANEL_USER" "$LOG_FILE" 2>/dev/null
+    chgrp "$PANEL_GROUP" "$LOG_FILE" 2>/dev/null
     chmod 660 "$LOG_FILE" 2>/dev/null
-    echo "[+] Queue and log writable by $PANEL_USER"
+    echo "[+] Queue and log writable by $PANEL_USER (group $PANEL_GROUP)"
 else
     echo "[!] Panel user $PANEL_USER not found — the hook will not be able to enqueue"
 fi
