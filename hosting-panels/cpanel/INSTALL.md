@@ -3,6 +3,7 @@
 ## Requirements
 
 - cPanel/WHM v82+
+- `python3` and `sqlite3` — the installer stops if `python3` is missing
 - Root access
 - BIND or PowerDNS as DNS server
 - SecondDNS API key — [get one here](https://seconddns.com/dashboard/api-key)
@@ -55,7 +56,29 @@ curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosti
   | bash
 ```
 
+## Existing zones
+
+The installer offers to queue everything the panel already serves, so a server
+with domains on it does not wait for each one to be touched by hand. It asks
+the panel for its zone list and queues the ones SecondDNS does not have yet;
+zones already there are left alone, and nothing is ever deleted by this step.
+
+Run it again at any time — it queues only what is missing:
+
+```bash
+seconddns-reconcile                        # report: missing / stale / ok
+seconddns-reconcile --add-missing --apply  # queue the missing ones
+```
+
 ## Troubleshooting
+
+**Zone did not reach the secondary — is it stuck in the queue?**
+```bash
+seconddns-queue status              # pending / failed / oldest age / last error
+systemctl status seconddns-queued   # the delivery worker
+```
+An unreachable API is not a loss: operations wait in the queue and the worker
+retries with a growing delay until they land.
 
 **Check logs:**
 ```bash
