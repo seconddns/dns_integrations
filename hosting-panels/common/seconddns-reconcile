@@ -54,8 +54,8 @@ def main():
 
     raw = zones_from_file(a.from_file) if a.from_file else panel_zones()
     panel, skipped = canonical_targets(raw)
-    if not panel:
-        sys.exit("no usable zone names from the panel; refusing to continue")
+    if raw and not panel:
+        sys.exit("the panel's zone names are all unusable; refusing to continue")
     panel_set = set(panel)
 
     missing = [n for n in panel if n not in by_name]

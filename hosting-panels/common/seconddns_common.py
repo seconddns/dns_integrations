@@ -163,8 +163,8 @@ def panel_zones():
     zones = [l.strip() for l in (out or "").splitlines() if l.strip()]
     if out is None:
         raise PanelError(f"could not read the zone list ({source}); refusing to continue")
-    if not zones:
-        raise PanelError(f"the panel reports no DNS zones ({source}); refusing to continue")
+    # A panel with no zones is a legal state — a fresh server, or one that was
+    # emptied. Only a failed read is an error, and that is the branch above.
     return zones
 
 
