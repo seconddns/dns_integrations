@@ -420,31 +420,18 @@ else
     echo -e "    \033[1;33mThen click Apply.\033[0m"
 fi
 
-# Initial sync
 echo ""
-if confirm "Queue existing domains for delivery to secondary DNS now?"; then
-    echo "[*] Syncing domains..."
-    added=0; skipped=0; failures=""
-    while IFS= read -r sdomain; do
-        [ -z "$sdomain" ] && continue
-        raw="$sdomain"
-        if ! sdomain=$(/usr/local/bin/seconddns-domain "$raw" 2>&1); then
-            echo "    [!] $raw: $sdomain"
-            skipped=$((skipped+1)); failures="$failures\n    $raw: $sdomain"
-            continue
-        fi
-        # hand over to the queue: the worker delivers with retry/backoff, FIFO,
-        # and 409-as-success, so an install during an API outage drains itself
-        if /usr/local/bin/seconddns-queue enqueue create "$sdomain" "$MASTER_IP"; then
-            echo "    [>] $sdomain"; added=$((added+1))
-        else
-            echo "    [!] $sdomain (enqueue failed, see $LOG_FILE)"; skipped=$((skipped+1)); failures="$failures\n    $sdomain: enqueue failed"
-        fi
-    done < <(plesk bin site --list 2>/dev/null)
-    echo "[+] Queued $added domain(s), $skipped skipped"
-    [ "$skipped" -gt 0 ] && echo -e "[!] Not queued:$failures"
-    echo "    Delivery runs in the background: seconddns-queue status"
+# reconcile already knows where each panel keeps its zone list; --add-missing
+# only, since removing a zone the panel lacks is a separate decision.
+if confirm "Queue existing zones for delivery to secondary DNS now?"; then
+    echo "[*] Syncing zones..."
+    if /usr/local/bin/seconddns-reconcile --add-missing --apply; then
+        echo "    Delivery runs in the background: seconddns-queue status"
+    else
+        echo "[!] Initial sync incomplete — rerun: seconddns-reconcile --add-missing --apply"
+    fi
 fi
+
 
 echo ""
 echo "=== Installation complete ==="
