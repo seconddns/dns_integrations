@@ -5,7 +5,7 @@ BindsTo=lscpd.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/seconddns ensure-signals
+ExecStart=/usr/local/CyberCP/plogical/seconddns_plugin.py ensure-signals
 RemainAfterExit=no
 
 [Install]
