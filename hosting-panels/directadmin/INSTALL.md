@@ -2,7 +2,8 @@
 
 ## Requirements
 
-- DirectAdmin with BIND/named or PowerDNS
+- DirectAdmin (it writes zones for BIND/named, its only DNS server)
+- `python3` and `sqlite3` — the installer stops if `python3` is missing
 - Root access
 - SecondDNS API key — [get one here](https://seconddns.com/dashboard/api-key)
 
@@ -20,43 +21,26 @@ Options:
 - `--master-ip=IP` — Primary DNS server IP (default: auto-detect)
 - `--yes` — Skip confirmation prompts
 
-## Post-install: Configure AXFR
+## AXFR — done by the installer
 
-Ensure your DNS server allows zone transfers to the SecondDNS secondary IP.
-
-### BIND/named
-
-Add to `named.conf.options` or each zone block:
+The installer does this: it finds `named.conf`, asks before editing, keeps a
+`.bak` copy and reloads named. What it adds to the `options` block:
 
 ```
 allow-transfer { <secondary-ip>; };
 also-notify { <secondary-ip>; };
 ```
 
-Then reload named:
+Add them by hand only if you declined the prompt, or if your BIND setup keeps
+its options somewhere the installer did not find. Check what is in place:
 
 ```bash
-rndc reload
-```
-
-### PowerDNS
-
-Add to `pdns.conf`:
-
-```
-allow-axfr-ips=<secondary-ip>
-also-notify=<secondary-ip>
-```
-
-Then restart:
-
-```bash
-systemctl restart pdns
+grep -E "allow-transfer|also-notify" /etc/named.conf
 ```
 
 ## Post-install: Configure Nameservers
 
-Add `ns2.seconddns.com` as a secondary nameserver for your domains.
+Add the nameserver shown in your SecondDNS dashboard (for example `ns2.seconddns.com.`) as a secondary for your domains. Accounts are served by different nameservers, so take the name from the dashboard.
 
 **For new domains** — update the DirectAdmin DNS template:
 
@@ -64,7 +48,7 @@ Add `ns2.seconddns.com` as a secondary nameserver for your domains.
 vi /usr/local/directadmin/data/templates/dns_*.conf
 ```
 
-Add an NS record line for `ns2.seconddns.com`.
+Add an NS record line for that nameserver.
 
 **For existing domains** — add NS record via DirectAdmin DNS Management or bulk update.
 
@@ -75,7 +59,29 @@ curl -sL https://raw.githubusercontent.com/seconddns/dns_integrations/main/hosti
   | bash
 ```
 
+## Existing zones
+
+The installer offers to queue everything the panel already serves, so a server
+with domains on it does not wait for each one to be touched by hand. It asks
+the panel for its zone list and queues the ones SecondDNS does not have yet;
+zones already there are left alone, and nothing is ever deleted by this step.
+
+Run it again at any time — it queues only what is missing:
+
+```bash
+seconddns-reconcile                        # report: missing / stale / ok
+seconddns-reconcile --add-missing --apply  # queue the missing ones
+```
+
 ## Troubleshooting
+
+**Zone did not reach the secondary — is it stuck in the queue?**
+```bash
+seconddns-queue status              # pending / failed / oldest age / last error
+systemctl status seconddns-queued   # the delivery worker
+```
+An unreachable API is not a loss: operations wait in the queue and the worker
+retries with a growing delay until they land.
 
 **Check logs:**
 ```bash
