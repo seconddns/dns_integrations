@@ -414,7 +414,7 @@ else
                     if grep -q "allow-transfer" "$NAMED_CONF"; then
                         sed -i '/allow-transfer/s/none;//g' "$NAMED_CONF"
                         if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF"; then
-                            sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_CONF"
+                            sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_CONF"
                         fi
                     else
                         sed -i "/^[[:space:]]*};/i\\
@@ -424,7 +424,7 @@ else
                     if grep -q "also-notify" "$NAMED_CONF"; then
                         sed -i '/also-notify/s/none;//g' "$NAMED_CONF"
                         if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF"; then
-                            sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_CONF"
+                            sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_CONF"
                         fi
                     else
                         sed -i "/^[[:space:]]*};/i\\

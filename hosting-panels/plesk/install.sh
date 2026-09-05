@@ -381,7 +381,7 @@ else
                     sed -i '/allow-transfer/s/none;//g' "$NAMED_OPTIONS"
                     # Add our IP if not already there
                     if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|allow-transfer\s*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\
@@ -392,7 +392,7 @@ else
                 if grep -q "also-notify" "$NAMED_OPTIONS"; then
                     sed -i '/also-notify/s/none;//g' "$NAMED_OPTIONS"
                     if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
-                        sed -i "s|also-notify\s*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
+                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
                     sed -i "/^[[:space:]]*};/i\\
