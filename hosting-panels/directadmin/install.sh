@@ -58,6 +58,16 @@ confirm() {
     [[ ! $REPLY =~ ^[Nn]$ ]]
 }
 
+valid_ip() {
+    case "$1" in
+        "") return 1 ;;
+        *:*) echo "$1" | grep -qE '^[0-9A-Fa-f:]+$' ;;
+        *)  echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
+            local IFS=. o
+            for o in $1; do [ "$o" -le 255 ] || return 1; done ;;
+    esac
+}
+
 echo "=== SecondDNS DirectAdmin Integration ==="
 echo ""
 
@@ -123,7 +133,13 @@ if [ -z "$MASTER_IP" ]; then
         echo "[+] Master IP: $MASTER_IP"
     else
         echo "[!] Could not auto-detect master IP"
-        read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+        # An unusable value here installs cleanly and then rejects every zone
+        # with an opaque HTTP 400, so keep asking until it is an address.
+        while :; do
+            read -p "    Enter your primary DNS server IP: " MASTER_IP < /dev/tty
+            valid_ip "$MASTER_IP" && break
+            echo "    Not an IPv4 or IPv6 address"
+        done
     fi
 fi
 
@@ -143,6 +159,14 @@ if [ ! -d "/usr/local/directadmin" ]; then
 fi
 
 # Create config
+# A bad master IP installs cleanly and then fails every zone with an opaque
+# HTTP 400 from the API, so refuse here instead.
+if ! valid_ip "$MASTER_IP"; then
+    echo "[!] Not a valid master IP: '$MASTER_IP'"
+    echo "    Pass a real address with --master-ip=IP"
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
     echo "[=] Config exists at $CONFIG_FILE — updating"
 fi
@@ -211,7 +235,9 @@ if [ -n "$DNS_IPS" ]; then
     # Check DirectAdmin CustomBuild config
     if [ -f "/usr/local/directadmin/custombuild/options.conf" ]; then
         DA_DNS=$(grep "^dns=" /usr/local/directadmin/custombuild/options.conf 2>/dev/null | cut -d= -f2)
-        echo "[=] DirectAdmin CustomBuild dns=$DA_DNS"
+        # recent DirectAdmin has no dns= key at all; an empty line reads as
+        # "no DNS server", which is wrong — detection below uses the services
+        [ -n "$DA_DNS" ] && echo "[=] DirectAdmin CustomBuild dns=$DA_DNS"
     fi
 
     # Detect PowerDNS
