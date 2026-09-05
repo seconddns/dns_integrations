@@ -37,6 +37,10 @@ sq() {
 
 init_db() {
     mkdir -p "$(dirname "$QDB")"
+    # SQLite gives -wal and -shm the mode of the database file, so this one
+    # chmod decides whether the panel's web user can enqueue at all.
+    [ -e "$QDB" ] || : > "$QDB"
+    chmod g+rw "$QDB" 2>/dev/null
     sq "PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS ops (
           id INTEGER PRIMARY KEY AUTOINCREMENT,

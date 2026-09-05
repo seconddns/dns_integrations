@@ -55,7 +55,7 @@ fi
 # Clone repo to temp dir for fresh files
 REPO_URL="https://github.com/seconddns/dns_integrations.git"
 WORK_DIR=$(mktemp -d)
-CYBER_SRC="$WORK_DIR/dns_integrations/cyberpanel"
+CYBER_SRC="$WORK_DIR/dns_integrations/hosting-panels/cyberpanel"
 
 if [ -f "seconddns.py" ]; then
     # Running from local clone
@@ -237,9 +237,23 @@ cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.s
 chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
-if ! command -v sqlite3 &>/dev/null; then
-    echo "[!] Warning: sqlite3 not found — offline queue disabled until installed"
+bash "$COMMON_SRC/install-sqlite.sh"
+
+# The signal handler runs inside CyberPanel's web process, not as root: without
+# this the hook fires, the enqueue fails, and the zone never leaves the panel.
+PANEL_USER=$(ps -eo user,comm | awk '$2=="lscpd" && $1!="root" {print $1; exit}')
+PANEL_USER=${PANEL_USER:-lscpd}
+if getent passwd "$PANEL_USER" >/dev/null 2>&1; then
+    chgrp -R "$PANEL_USER" /var/lib/seconddns 2>/dev/null
+    chmod 2770 /var/lib/seconddns 2>/dev/null
+    find /var/lib/seconddns -type f -exec chmod 660 {} + 2>/dev/null
+    chgrp "$PANEL_USER" "$LOG_FILE" 2>/dev/null
+    chmod 660 "$LOG_FILE" 2>/dev/null
+    echo "[+] Queue and log writable by $PANEL_USER"
+else
+    echo "[!] Panel user $PANEL_USER not found — the hook will not be able to enqueue"
 fi
+
 systemctl daemon-reload
 systemctl enable --now seconddns-queued.service
 echo "[+] Queue worker: seconddns-queued.service (systemd, FIFO delivery with backoff)"
@@ -284,10 +298,22 @@ if [ -n "$PDNS_CONF" ]; then
 
     echo "[+] Secondary DNS IP: $DNS_IPS"
 
+    # PowerDNS 5 renamed master to primary and refuses to start on an unknown
+    # setting, so the wrong name takes the customer's DNS down entirely.
+    PDNS_MAJOR=$(pdns_server --version 2>&1 | grep -oE "PowerDNS Authoritative Server [0-9]+" | grep -oE "[0-9]+$")
+    [ -z "$PDNS_MAJOR" ] && PDNS_MAJOR=$(rpm -q --qf "%{VERSION}" pdns 2>/dev/null | cut -d. -f1)
+    [ -z "$PDNS_MAJOR" ] && PDNS_MAJOR=$(dpkg-query -W -f='"'"'${Version}'"'"' pdns-server 2>/dev/null | cut -d. -f1)
+    if [ -n "$PDNS_MAJOR" ] && [ "$PDNS_MAJOR" -ge 5 ] 2>/dev/null; then
+        PRIMARY_SETTING="primary"
+    else
+        PRIMARY_SETTING="master"
+    fi
+    echo "[+] PowerDNS ${PDNS_MAJOR:-unknown}: using ${PRIMARY_SETTING}=yes"
+
     if [ -n "$DNS_IPS" ]; then
         ISSUES=0
-        if ! grep -qE "^master=yes" "$PDNS_CONF" 2>/dev/null; then
-            echo "[!] master=yes is missing"
+        if ! grep -qE "^${PRIMARY_SETTING}=yes" "$PDNS_CONF" 2>/dev/null; then
+            echo "[!] ${PRIMARY_SETTING}=yes is missing"
             ISSUES=$((ISSUES+1))
         fi
         if ! grep -qE "^allow-axfr-ips=.*${DNS_IPS%%,*}" "$PDNS_CONF" 2>/dev/null; then
@@ -305,9 +331,12 @@ if [ -n "$PDNS_CONF" ]; then
 
         if [ "$ISSUES" -gt 0 ]; then
             if confirm "Apply fixes automatically? (backup will be created)"; then
-                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+                BACKUP_STAMP=$(date +%s)
+                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$BACKUP_STAMP"
 
-                grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
+                # the other spelling would be fatal on this version; drop it
+                sed -i "/^master=yes$/d;/^primary=yes$/d" "$PDNS_CONF"
+                echo "${PRIMARY_SETTING}=yes" >> "$PDNS_CONF"
                 grep -qE "^default-soa-edit=" "$PDNS_CONF" || echo "default-soa-edit=INCEPTION-INCREMENT" >> "$PDNS_CONF"
 
                 if grep -qE "^allow-axfr-ips=" "$PDNS_CONF"; then
@@ -325,7 +354,17 @@ if [ -n "$PDNS_CONF" ]; then
                 fi
 
                 systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
-                echo "[+] PowerDNS configured and restarted"
+                sleep 2
+                if systemctl is-active --quiet pdns 2>/dev/null || pgrep -x pdns_server >/dev/null; then
+                    echo "[+] PowerDNS configured and restarted"
+                else
+                    # Saying "OK" while the DNS server is down is worse than
+                    # failing: restore what was there and let a human look.
+                    cp "${PDNS_CONF}.bak.$BACKUP_STAMP" "$PDNS_CONF"
+                    systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                    echo "[!] PowerDNS did not come back — configuration restored from the backup"
+                    echo "[!] Check: journalctl -u pdns -n 20"
+                fi
             fi
         else
             echo "[+] PowerDNS AXFR config OK"
