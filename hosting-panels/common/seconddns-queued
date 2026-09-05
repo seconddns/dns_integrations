@@ -216,6 +216,10 @@ def detail(code, data):
         return data.get("error", "no response")
     if code in (401, 403):
         return f"HTTP {code} auth rejected"
+    # the API says why it refused; without it a 4xx is undiagnosable on the box
+    why = data.get("error") if isinstance(data, dict) else None
+    if why:
+        return f"HTTP {code}: {str(why)[:200]}"
     return f"HTTP {code}"
 
 
