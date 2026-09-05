@@ -239,10 +239,8 @@ bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 bash "$COMMON_SRC/install-sqlite.sh"
 
-# The signal handler runs inside CyberPanel's web process, not as root: without
-# this the hook fires, the enqueue fails, and the zone never leaves the panel.
-# The application, not the web server: lscpd is the server, and the Django
-# process that runs our handler belongs to cyberpanel.
+# The handler runs in the Django process, which belongs to cyberpanel, not in
+# lscpd and not as root: without this the enqueue fails and the zone stays.
 PANEL_USER=$(ps -eo user:32,args | awk '/[C]yberCP/ && $1!="root" {print $1; exit}')
 [ -z "$PANEL_USER" ] && getent passwd cyberpanel >/dev/null 2>&1 && PANEL_USER=cyberpanel
 PANEL_USER=${PANEL_USER:-lscpd}

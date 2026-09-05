@@ -1,6 +1,6 @@
 #!/bin/bash
-# The plugin's two rules about names it cannot trust: a name that will not
-# canonicalise is refused, and a website check that cannot answer keeps the zone.
+# Two rules: a name that will not canonicalise is refused, and a website check
+# that cannot answer keeps the zone.
 # Run: bash hosting-panels/common/tests/test_cyberpanel_plugin.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,9 +22,8 @@ class Req:  # the handlers only pass it to _extract_domain, which we replace
     pass
 
 m._extract_domain = lambda request, response=None: RAW
-# Truthy on purpose: with an empty config the handlers return before touching
-# remove_zone, and a row asserting "nothing was removed" would pass for the
-# wrong reason.
+# Truthy on purpose: an empty config returns before remove_zone, so the row
+# would pass without proving anything.
 m.load_config = lambda: {"api_key": "k", "api_url": "https://example.invalid"}
 removed = []
 added = []
