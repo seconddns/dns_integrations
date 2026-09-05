@@ -1,7 +1,6 @@
 #!/bin/bash
-# Tests the installers' initial fill: reconcile --add-missing --apply queues the
-# zones the panel has and SecondDNS does not, touches nothing else, and queues
-# nothing on a second run.
+# The installers' initial fill: --add-missing --apply queues the zones the panel
+# has and SecondDNS does not, touches nothing else, and repeats to nothing.
 # Run: bash hosting-panels/common/tests/test_initial_sync.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
