@@ -19,9 +19,9 @@ All integrations use the same pattern: catch the panel event, call the SecondDNS
 
 | Panel | Mechanism | Tested on |
 |:------|:----------|:----------|
-| [cPanel/WHM](hosting-panels/cpanel/) | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
-| [CyberPanel](hosting-panels/cyberpanel/) | Django signals (`postWebsiteCreation`, `postZoneCreation`) | CyberPanel 2.4.5 |
-| [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`) | DirectAdmin 1.699 |
+| [cPanel/WHM](hosting-panels/cpanel/) **(beta)** | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
+| [CyberPanel](hosting-panels/cyberpanel/) | Django signals (6: website, domain and zone, create and delete) | CyberPanel 2.4.5 |
+| [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`, `domain_change_post`) | DirectAdmin 1.699, 1.709 |
 | [Plesk](hosting-panels/plesk/) | Event Manager (12 events, incl. rename + aliases) | Plesk Obsidian 18.0.77.2 |
 
 ### Quick install
@@ -125,7 +125,7 @@ Both integrations use the SecondDNS API key. See the README in each directory fo
 
 - SecondDNS account and API key — [get one here](https://seconddns.com/dashboard/api-key)
 - TCP port 53 open from your server to the SecondDNS secondary nameserver IP
-- BIND or PowerDNS configured with `allow-transfer` and `also-notify` for the secondary IP
+- BIND or PowerDNS with `allow-transfer` and `also-notify` for the secondary IP — the installer configures this after asking, and keeps a backup of the file it edits
 
 ---
 
