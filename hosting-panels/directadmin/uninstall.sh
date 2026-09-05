@@ -14,7 +14,7 @@ echo "=== SecondDNS DirectAdmin Uninstaller ==="
 echo ""
 
 # Remove hooks
-for hook in dns_create_post.sh dns_delete_post.sh; do
+for hook in dns_create_post.sh dns_delete_post.sh domain_change_post.sh; do
     if [ -f "$HOOKS_DIR/$hook" ] && grep -q "seconddns" "$HOOKS_DIR/$hook" 2>/dev/null; then
         rm -f "$HOOKS_DIR/$hook"
         echo "[+] Removed hook: $HOOKS_DIR/$hook"
