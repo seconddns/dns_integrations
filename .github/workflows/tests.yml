@@ -16,6 +16,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq idn2 sqlite3 curl util-linux
 
+      # a test nobody added a step for runs nowhere and says nothing
+      - name: Every test script has a step
+        run: |
+          missing=0
+          for t in hosting-panels/common/tests/test_*.sh; do
+            grep -q "$(basename "$t")" .github/workflows/tests.yml || {
+              echo "::error file=$t::no step in the workflow runs this test"; missing=1; }
+          done
+          exit $missing
+
       - name: Syntax check every shell script
         run: |
           fail=0
@@ -36,6 +46,9 @@ jobs:
 
       - name: test_domain_change_hook.sh
         run: bash hosting-panels/common/tests/test_domain_change_hook.sh
+
+      - name: test_initial_sync.sh
+        run: bash hosting-panels/common/tests/test_initial_sync.sh
 
       - name: test_cyberpanel_db.sh
         run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
