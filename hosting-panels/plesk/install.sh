@@ -98,9 +98,8 @@ curl -sf --max-time 10 \
     exit 1
 }
 
-# Detect server IPs. The kernel's own route to a public address names the
-# source it would use, which is the address the secondary will actually see;
-# an outside echo service is only consulted for IPv4, where NAT can hide it.
+# The kernel's route to a public address names the source the secondary will
+# see; an echo service is asked only for IPv4, where NAT can hide it.
 detect_v4() {
     local ip
     ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
