@@ -65,6 +65,9 @@ jobs:
       - name: test_cpanel_hook_payload.sh
         run: bash hosting-panels/common/tests/test_cpanel_hook_payload.sh
 
+      - name: test_cpanel_rename.sh
+        run: bash hosting-panels/common/tests/test_cpanel_rename.sh
+
       - name: test_cyberpanel_db.sh
         run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
 
