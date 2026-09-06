@@ -74,6 +74,43 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
+# Add the secondary to allow-transfer and also-notify inside the options block.
+# Bounded to options: a config with views has a closing brace per block, and an
+# unbounded insert lands in logging.
+configure_named_axfr() {
+    local conf="$1" ip="$2" tmp
+    tmp="$(mktemp)"
+
+    _rewrite() { cat > "$tmp" && cat "$tmp" > "$conf"; }
+
+    # cPanel writes the ACL quoted, other panels bare
+    sed -e '/allow-transfer/s/"none";//g' -e '/allow-transfer/s/[[:space:]]none;//g' \
+        -e '/also-notify/s/"none";//g'    -e '/also-notify/s/[[:space:]]none;//g' "$conf" | _rewrite
+
+    if grep -q "allow-transfer" "$conf"; then
+        grep -q "allow-transfer.*$ip" "$conf" || \
+            sed "s|allow-transfer[[:space:]]*{|allow-transfer { $ip; |" "$conf" | _rewrite
+    else
+        awk -v ip="$ip" '
+            /^options[[:space:]]*{/ { inopt = 1 }
+            inopt && /^};/ { print "    allow-transfer { " ip "; };"; inopt = 0 }
+            { print }' "$conf" | _rewrite
+    fi
+
+    if grep -q "also-notify" "$conf"; then
+        grep -q "also-notify.*$ip" "$conf" || \
+            sed "s|also-notify[[:space:]]*{|also-notify { $ip; |" "$conf" | _rewrite
+    else
+        awk -v ip="$ip" '
+            /^options[[:space:]]*{/ { inopt = 1 }
+            inopt && /^};/ { print "    also-notify { " ip "; };"; inopt = 0 }
+            { print }' "$conf" | _rewrite
+    fi
+
+    rm -f "$tmp"
+    unset -f _rewrite
+}
+
 echo "=== SecondDNS DirectAdmin Integration ==="
 echo ""
 
@@ -393,57 +430,28 @@ if [ -n "$DNS_IPS" ]; then
         done
 
         if [ -n "$NAMED_OPTIONS" ]; then
-            if grep -q "allow-transfer" "$NAMED_OPTIONS" 2>/dev/null; then
-                if grep -q "$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-                    echo "[+] BIND allow-transfer already includes $SECONDARY_IP"
-                else
-                    echo "[!] BIND allow-transfer does not include $SECONDARY_IP"
-                    if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
-                        cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
-                        # Remove 'none;' if present, then add our IP
-                        sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
-                        echo "[+] Added $SECONDARY_IP to allow-transfer"
-                    fi
-                fi
-            else
-                echo "[!] No allow-transfer directive found"
-                if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
-                    cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
-                    # Add before closing }; of options block
-                    sed -i "/^options[[:space:]]*{/,/^};/ {
-                        /^};/ i\\
-\\tallow-transfer { $SECONDARY_IP; };\\
-\\talso-notify { $SECONDARY_IP; };
-                    }" "$NAMED_OPTIONS"
-                    echo "[+] Added allow-transfer and also-notify"
-                fi
-            fi
-
-            # Check also-notify
-            if grep -q "also-notify" "$NAMED_OPTIONS" 2>/dev/null; then
-                if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-                    echo "[!] also-notify does not include $SECONDARY_IP"
-                    if confirm "Add $SECONDARY_IP to also-notify?"; then
-                        sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "/also-notify/s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
-                        echo "[+] Added $SECONDARY_IP to also-notify"
-                    fi
-                fi
-            else
-                if confirm "Add also-notify for $SECONDARY_IP?"; then
-                    sed -i "/^options[[:space:]]*{/,/^};/ {
-                        /^};/ i\\
-\\talso-notify { $SECONDARY_IP; };
-                    }" "$NAMED_OPTIONS"
-                    echo "[+] Added also-notify"
-                fi
+            if grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null \
+               && grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
+                echo "[+] BIND AXFR config already includes $SECONDARY_IP"
+            elif confirm "Add allow-transfer and also-notify for $SECONDARY_IP to $NAMED_OPTIONS?"; then
+                NAMED_BAK="${NAMED_OPTIONS}.bak.$(date +%s)"
+                cp "$NAMED_OPTIONS" "$NAMED_BAK"
+                configure_named_axfr "$NAMED_OPTIONS" "$SECONDARY_IP"
+                echo "[+] Added allow-transfer and also-notify"
             fi
 
             # Reload named
             if confirm "Reload named to apply changes?"; then
-                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || service named reload 2>/dev/null
-                echo "[+] named reloaded"
+                if named-checkconf >/dev/null 2>&1; then
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || service named reload >/dev/null 2>&1
+                    echo "[+] named reloaded"
+                else
+                    # a config named cannot parse is worse than no change
+                    [ -n "${NAMED_BAK:-}" ] && cp "$NAMED_BAK" "$NAMED_OPTIONS"
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
+                    echo "[!] named.conf did not validate — restored from the backup"
+                    echo "[!] Check: named-checkconf"
+                fi
             fi
         else
             echo "[!] Could not find named options file"
