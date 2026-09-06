@@ -510,39 +510,6 @@ if [ -n "$API_NS" ]; then
     fi
 fi
 
-# Initial sync
-echo ""
-if confirm "Sync existing cPanel accounts to secondary DNS now?"; then
-    echo "[*] Syncing accounts..."
-    added=0
-    failed=0
-
-    if [ -d /var/cpanel/users ]; then
-        for user_file in /var/cpanel/users/*; do
-            [ -f "$user_file" ] || continue
-            sdomain=$(grep "^DNS=" "$user_file" 2>/dev/null | cut -d= -f2)
-            [ -z "$sdomain" ] && continue
-
-            response=$(curl -sf --max-time 15 \
-                -X POST \
-                -H "X-API-Key: $API_KEY" \
-                -H "Content-Type: application/json" \
-                -H "User-Agent: SecondDNS-cPanel/1.0" \
-                -d "{\"name\":\"$sdomain\",\"masterIp\":\"$MASTER_IP\"}" \
-                "$API_URL/api/zones" 2>/dev/null)
-            if [ $? -eq 0 ]; then
-                echo "    [+] $sdomain"
-                added=$((added+1))
-            else
-                failed=$((failed+1))
-            fi
-        done
-    else
-        echo "[!] /var/cpanel/users not found — skipping sync"
-    fi
-
-    echo "[+] Synced: $added domains, failed: $failed"
-fi
 
 echo ""
 # reconcile already knows where each panel keeps its zone list; --add-missing

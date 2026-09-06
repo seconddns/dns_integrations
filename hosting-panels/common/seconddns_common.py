@@ -5,6 +5,7 @@
 import configparser
 import json
 import os
+import socket
 import subprocess
 import sys
 import urllib.error
@@ -163,9 +164,26 @@ def panel_zones():
     zones = [l.strip() for l in (out or "").splitlines() if l.strip()]
     if out is None:
         raise PanelError(f"could not read the zone list ({source}); refusing to continue")
+    # The server's own hostname zone belongs to the host, not the customer; the
+    # API refuses it, so every cPanel install left a failed op behind.
+    host = _server_hostname()
+    if host:
+        zones = [z for z in zones if z.lower().rstrip(".") != host]
     # A panel with no zones is a legal state — a fresh server, or one that was
     # emptied. Only a failed read is an error, and that is the branch above.
     return zones
+
+
+def _server_hostname():
+    """This machine's fully qualified name, lowercased, or '' if unknown."""
+    name = os.environ.get("SECONDDNS_HOSTNAME")  # tests
+    if name is None:
+        try:
+            name = socket.getfqdn()
+        except OSError:
+            return ""
+    name = (name or "").strip().lower().rstrip(".")
+    return name if "." in name else ""
 
 
 def zones_from_file(path):
