@@ -27,7 +27,7 @@ try:
     d = json.load(sys.stdin)
     # cPanel nests the event under "data"; older shapes put it at the top level
     src = d.get('data') if isinstance(d.get('data'), dict) else d
-    print(src.get('domain') or src.get('newdomain') or '')
+    print(src.get('new_domain') or src.get('domain') or src.get('newdomain') or '')
 except Exception:
     pass
 " 2>/dev/null)

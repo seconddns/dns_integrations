@@ -272,23 +272,31 @@ else
     echo "[!] Failed: Whostmgr::Accounts::Remove"
 fi
 
-# cPanel addon domain create (post)
+# Addon, parked and alias domains all go through park/unpark; the Api2
+# AddonDomain events are not fired by current cPanel and are kept as a fallback.
 if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_create.sh" \
-    --category Api2 --event AddonDomain::addaddon --stage post 2>/dev/null; then
-    echo "[+] Registered: Api2::AddonDomain::addaddon (post)"
+    --category Whostmgr --event Domain::park --stage post 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Domain::park (post)"
     REGISTERED=$((REGISTERED+1))
 else
-    echo "[!] Failed: Api2::AddonDomain::addaddon"
+    echo "[!] Failed: Whostmgr::Domain::park"
 fi
 
-# cPanel addon domain delete (post)
 if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
-    --category Api2 --event AddonDomain::deladdondomain --stage post 2>/dev/null; then
-    echo "[+] Registered: Api2::AddonDomain::deladdondomain (post)"
+    --category Whostmgr --event Domain::unpark --stage pre 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Domain::unpark (pre)"
     REGISTERED=$((REGISTERED+1))
 else
-    echo "[!] Failed: Api2::AddonDomain::deladdondomain"
+    echo "[!] Failed: Whostmgr::Domain::unpark"
 fi
+
+# older cPanel: the Api2 addon events, harmless where they never fire
+"$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_create.sh" \
+    --category Api2 --event AddonDomain::addaddondomain --stage post &>/dev/null \
+    && echo "[+] Registered: Api2::AddonDomain::addaddondomain (post)"
+"$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
+    --category Api2 --event AddonDomain::deladdondomain --stage post &>/dev/null \
+    && echo "[+] Registered: Api2::AddonDomain::deladdondomain (post)"
 
 echo "[+] Registered $REGISTERED hooks"
 
