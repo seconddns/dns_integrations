@@ -1,6 +1,6 @@
 #!/bin/bash
-# The server's own hostname zone is not a customer zone: cPanel lists it and the
-# API refuses it, so every install left a failed op behind.
+# The server's own hostname is not a customer zone: cPanel lists it, the API
+# refuses it, and every install left a failed op behind.
 # Run: bash hosting-panels/common/tests/test_hostname_filter.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
