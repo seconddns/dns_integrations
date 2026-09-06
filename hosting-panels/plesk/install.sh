@@ -391,34 +391,45 @@ else
 
         if [ "$NEEDS_FIX" -eq 1 ]; then
             if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
-                cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+                NAMED_BAK="${NAMED_OPTIONS}.bak.$(date +%s)"
+                cp "$NAMED_OPTIONS" "$NAMED_BAK"
 
                 # allow-transfer
                 if grep -q "allow-transfer" "$NAMED_OPTIONS"; then
                     # Remove none; from allow-transfer line only
-                    sed -i '/allow-transfer/s/none;//g' "$NAMED_OPTIONS"
+                    sed -i '/allow-transfer/s/"\?none"\?;//g' "$NAMED_OPTIONS"
                     # Add our IP if not already there
                     if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
                         sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
-                    sed -i "/^[[:space:]]*};/i\\
-\\tallow-transfer { $SECONDARY_IP; };" "$NAMED_OPTIONS"
+                    sed -i "/^options[[:space:]]*{/,/^};/ { /^};/ i\\
+\\tallow-transfer { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
                 fi
 
                 # also-notify
                 if grep -q "also-notify" "$NAMED_OPTIONS"; then
-                    sed -i '/also-notify/s/none;//g' "$NAMED_OPTIONS"
+                    sed -i '/also-notify/s/"\?none"\?;//g' "$NAMED_OPTIONS"
                     if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS"; then
                         sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
                     fi
                 else
-                    sed -i "/^[[:space:]]*};/i\\
-\\talso-notify { $SECONDARY_IP; };" "$NAMED_OPTIONS"
+                    sed -i "/^options[[:space:]]*{/,/^};/ { /^};/ i\\
+\\talso-notify { $SECONDARY_IP; };
+                    }" "$NAMED_OPTIONS"
                 fi
 
-                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || true
-                echo "[+] BIND configured and reloaded"
+                if named-checkconf >/dev/null 2>&1; then
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
+                    echo "[+] BIND configured and reloaded"
+                else
+                    # a config named cannot parse is worse than no change
+                    cp "$NAMED_BAK" "$NAMED_OPTIONS"
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
+                    echo "[!] named.conf did not validate — restored from the backup"
+                    echo "[!] Check: named-checkconf"
+                fi
             fi
         else
             echo "[+] BIND AXFR config already includes $SECONDARY_IP"

@@ -399,10 +399,11 @@ if [ -n "$DNS_IPS" ]; then
                 else
                     echo "[!] BIND allow-transfer does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to allow-transfer in $NAMED_OPTIONS?"; then
-                        cp "$NAMED_OPTIONS" "${NAMED_OPTIONS}.bak.$(date +%s)"
+                        NAMED_BAK="${NAMED_OPTIONS}.bak.$(date +%s)"
+                        cp "$NAMED_OPTIONS" "$NAMED_BAK"
                         # Remove 'none;' if present, then add our IP
                         sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
+                        sed -i '/allow-transfer/s/"\?none"\?;//g' "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to allow-transfer"
                     fi
                 fi
@@ -426,7 +427,7 @@ if [ -n "$DNS_IPS" ]; then
                     echo "[!] also-notify does not include $SECONDARY_IP"
                     if confirm "Add $SECONDARY_IP to also-notify?"; then
                         sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_OPTIONS"
-                        sed -i "/also-notify/s|[[:space:]]*none[[:space:]]*;||g" "$NAMED_OPTIONS"
+                        sed -i '/also-notify/s/"\?none"\?;//g' "$NAMED_OPTIONS"
                         echo "[+] Added $SECONDARY_IP to also-notify"
                     fi
                 fi
@@ -442,8 +443,16 @@ if [ -n "$DNS_IPS" ]; then
 
             # Reload named
             if confirm "Reload named to apply changes?"; then
-                rndc reload 2>/dev/null || systemctl reload named 2>/dev/null || service named reload 2>/dev/null
-                echo "[+] named reloaded"
+                if named-checkconf >/dev/null 2>&1; then
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || service named reload >/dev/null 2>&1
+                    echo "[+] named reloaded"
+                else
+                    # a config named cannot parse is worse than no change
+                    [ -n "${NAMED_BAK:-}" ] && cp "$NAMED_BAK" "$NAMED_OPTIONS"
+                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
+                    echo "[!] named.conf did not validate — restored from the backup"
+                    echo "[!] Check: named-checkconf"
+                fi
             fi
         else
             echo "[!] Could not find named options file"

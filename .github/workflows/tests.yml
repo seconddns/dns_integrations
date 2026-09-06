@@ -68,6 +68,9 @@ jobs:
       - name: test_cpanel_rename.sh
         run: bash hosting-panels/common/tests/test_cpanel_rename.sh
 
+      - name: test_named_conf_edit.sh
+        run: bash hosting-panels/common/tests/test_named_conf_edit.sh
+
       - name: test_cyberpanel_db.sh
         run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
 
