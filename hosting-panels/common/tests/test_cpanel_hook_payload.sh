@@ -72,6 +72,20 @@ PARK='{"context":{"category":"Whostmgr","event":"Domain::park","stage":"post"},"
 [ "$(extract "$DEL" "$PARK")" = "addon.example.com" ] \
     && ok "delete reads new_domain, not the target" || fail "delete got '$(extract "$DEL" "$PARK")'"
 
+echo "== an account with no readable userdata is reported, not swallowed"
+TMPLOG="$(mktemp -d)"
+cat > "$TMPLOG/conf" <<'CONF'
+[seconddns]
+api_url = http://127.0.0.1:1
+api_key = test-key
+master_ip = 192.0.2.10
+CONF
+SECONDDNS_CONFIG="$TMPLOG/conf" SECONDDNS_LOG="$TMPLOG/log" SECONDDNS_CPANEL_ROOT="$TMPLOG/empty" \
+    bash "$DEL" <<< '{"data":{"user":"nosuchuser","killdns":1}}' >/dev/null 2>&1
+grep -q "nosuchuser" "$TMPLOG/log" 2>/dev/null \
+    && ok "names the account in the log" || fail "silent: '$(cat "$TMPLOG/log" 2>/dev/null)'"
+rm -rf "$TMPLOG"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

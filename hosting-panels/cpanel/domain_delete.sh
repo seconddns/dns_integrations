@@ -6,8 +6,8 @@
 # Triggered before a cPanel account or addon domain is removed
 # Input: JSON on stdin — field: domain
 
-CONFIG="/etc/seconddns.conf"
-LOG="/var/log/seconddns.log"
+CONFIG="${SECONDDNS_CONFIG:-/etc/seconddns.conf}"
+LOG="${SECONDDNS_LOG:-/var/log/seconddns.log}"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
 
@@ -69,7 +69,21 @@ except Exception:
     pass
 " 2>/dev/null)
 
-[ -z "$ZONE_NAMES" ] && exit 0
+if [ -z "$ZONE_NAMES" ]; then
+    # an account whose userdata cannot be read would otherwise leave every one
+    # of its zones on the secondary, silently
+    HOOK_USER=$(echo "$STDIN_DATA" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    src = d.get('data') if isinstance(d.get('data'), dict) else d
+    print(src.get('user') or '')
+except Exception:
+    pass
+" 2>/dev/null)
+    [ -n "$HOOK_USER" ] && log "[!] No domains found for account '$HOOK_USER' — its zones stay on the secondary; check /var/cpanel/userdata/$HOOK_USER/main"
+    exit 0
+fi
 
 DOMAIN_LIB="/usr/local/bin/seconddns-domain"
 [ -r "$DOMAIN_LIB" ] || { log "[!] $DOMAIN_LIB missing, cannot validate zone name"; exit 0; }
