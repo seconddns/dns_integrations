@@ -215,7 +215,7 @@ chmod 664 "$LOG_FILE"
 echo "[+] Log file: $LOG_FILE"
 
 # Install hook scripts
-for script in domain_create.sh domain_delete.sh; do
+for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     curl -sf --max-time 10 -o "$SCRIPT_DIR/seconddns-cpanel-${script}" "$REPO_URL/$script?t=$(date +%s)"
     chmod +x "$SCRIPT_DIR/seconddns-cpanel-${script}"
     echo "[+] Installed: $SCRIPT_DIR/seconddns-cpanel-${script}"
@@ -270,6 +270,16 @@ if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
     REGISTERED=$((REGISTERED+1))
 else
     echo "[!] Failed: Whostmgr::Accounts::Remove"
+fi
+
+# Renaming an account's main domain: WHM sends the new name and keeps the old
+# one on disk until this hook returns, so it runs at stage pre.
+if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_rename.sh" \
+    --category Whostmgr --event Accounts::Modify --stage pre 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Accounts::Modify (pre)"
+    REGISTERED=$((REGISTERED+1))
+else
+    echo "[!] Failed: Whostmgr::Accounts::Modify"
 fi
 
 # Addon, parked and alias domains all go through park/unpark; the Api2
@@ -536,6 +546,7 @@ echo "=== Installation complete ==="
 echo ""
 echo "  Config:   $CONFIG_FILE"
 echo "  Scripts:  $SCRIPT_DIR/seconddns-cpanel-domain_create.sh"
+echo "            $SCRIPT_DIR/seconddns-cpanel-domain_rename.sh"
 echo "            $SCRIPT_DIR/seconddns-cpanel-domain_delete.sh"
 echo "  Logs:     tail -f $LOG_FILE"
 echo ""

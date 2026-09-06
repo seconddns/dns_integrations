@@ -49,7 +49,7 @@ else
 fi
 
 # Remove scripts
-for script in domain_create.sh domain_delete.sh; do
+for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     target="$SCRIPT_DIR/seconddns-cpanel-${script}"
     if [ -f "$target" ]; then
         rm -f "$target"
