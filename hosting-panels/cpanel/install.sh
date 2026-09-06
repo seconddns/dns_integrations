@@ -75,6 +75,43 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
+# Add the secondary to allow-transfer and also-notify inside the options block.
+# Bounded to options: a config with views has a closing brace per block, and an
+# unbounded insert lands in logging.
+configure_named_axfr() {
+    local conf="$1" ip="$2" tmp
+    tmp="$(mktemp)"
+
+    _rewrite() { cat > "$tmp" && cat "$tmp" > "$conf"; }
+
+    # cPanel writes the ACL quoted, other panels bare
+    sed -e '/allow-transfer/s/"none";//g' -e '/allow-transfer/s/[[:space:]]none;//g' \
+        -e '/also-notify/s/"none";//g'    -e '/also-notify/s/[[:space:]]none;//g' "$conf" | _rewrite
+
+    if grep -q "allow-transfer" "$conf"; then
+        grep -q "allow-transfer.*$ip" "$conf" || \
+            sed "s|allow-transfer[[:space:]]*{|allow-transfer { $ip; |" "$conf" | _rewrite
+    else
+        awk -v ip="$ip" '
+            /^options[[:space:]]*{/ { inopt = 1 }
+            inopt && /^};/ { print "    allow-transfer { " ip "; };"; inopt = 0 }
+            { print }' "$conf" | _rewrite
+    fi
+
+    if grep -q "also-notify" "$conf"; then
+        grep -q "also-notify.*$ip" "$conf" || \
+            sed "s|also-notify[[:space:]]*{|also-notify { $ip; |" "$conf" | _rewrite
+    else
+        awk -v ip="$ip" '
+            /^options[[:space:]]*{/ { inopt = 1 }
+            inopt && /^};/ { print "    also-notify { " ip "; };"; inopt = 0 }
+            { print }' "$conf" | _rewrite
+    fi
+
+    rm -f "$tmp"
+    unset -f _rewrite
+}
+
 echo "=== SecondDNS cPanel/WHM Integration ==="
 echo ""
 
@@ -455,27 +492,7 @@ else
                     NAMED_BAK="${NAMED_CONF}.bak.$(date +%s)"
                     cp "$NAMED_CONF" "$NAMED_BAK"
 
-                    if grep -q "allow-transfer" "$NAMED_CONF"; then
-                        sed -i '/allow-transfer/s/"\?none"\?;//g' "$NAMED_CONF"
-                        if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_CONF"; then
-                            sed -i "s|allow-transfer[[:space:]]*{|allow-transfer { $SECONDARY_IP; |" "$NAMED_CONF"
-                        fi
-                    else
-                        sed -i "/^options[[:space:]]*{/,/^};/ { /^};/ i\\
-\\tallow-transfer { $SECONDARY_IP; };
-                        }" "$NAMED_CONF"
-                    fi
-
-                    if grep -q "also-notify" "$NAMED_CONF"; then
-                        sed -i '/also-notify/s/"\?none"\?;//g' "$NAMED_CONF"
-                        if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_CONF"; then
-                            sed -i "s|also-notify[[:space:]]*{|also-notify { $SECONDARY_IP; |" "$NAMED_CONF"
-                        fi
-                    else
-                        sed -i "/^options[[:space:]]*{/,/^};/ { /^};/ i\\
-\\talso-notify { $SECONDARY_IP; };
-                        }" "$NAMED_CONF"
-                    fi
+                    configure_named_axfr "$NAMED_CONF" "$SECONDARY_IP"
 
                     if named-checkconf >/dev/null 2>&1; then
                         rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
