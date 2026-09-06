@@ -19,7 +19,7 @@ All integrations use the same pattern: catch the panel event, call the SecondDNS
 
 | Panel | Mechanism | Tested on |
 |:------|:----------|:----------|
-| [cPanel/WHM](hosting-panels/cpanel/) **(beta)** | Standardized Hooks via `manage_hooks` (4 events) | cPanel/WHM v82+ |
+| [cPanel/WHM](hosting-panels/cpanel/) | Standardized Hooks via `manage_hooks` (5 events, incl. rename + addon/alias) | cPanel/WHM 136 |
 | [CyberPanel](hosting-panels/cyberpanel/) | Django signals (6: website, domain and zone, create and delete) | CyberPanel 2.4.5 |
 | [DirectAdmin](hosting-panels/directadmin/) | Custom hooks (`dns_create_post`, `dns_delete_post`, `domain_change_post`) | DirectAdmin 1.699, 1.709 |
 | [Plesk](hosting-panels/plesk/) | Event Manager (12 events, incl. rename + aliases) | Plesk Obsidian 18.0.77.2 |
