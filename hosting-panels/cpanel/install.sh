@@ -351,7 +351,8 @@ else
         if [ ! -f "$PDNS_CONF" ]; then
             echo "[!] pdns.conf not found at $PDNS_CONF — configure AXFR manually"
         else
-            cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+            PDNS_BAK="${PDNS_CONF}.bak.$(date +%s)"
+            cp "$PDNS_CONF" "$PDNS_BAK"
 
             # primary / master mode (name differs by pdns version)
             if grep -q "^master=" "$PDNS_CONF" 2>/dev/null; then
@@ -401,13 +402,19 @@ else
                 echo "[+] PowerDNS: also-notify=$SECONDARY_IP"
             fi
 
-            # Reload
-            if systemctl reload pdns &>/dev/null 2>&1; then
-                echo "[+] PowerDNS reloaded"
-            elif pdns_control reload &>/dev/null 2>&1; then
-                echo "[+] PowerDNS reloaded via pdns_control"
+            # A reload rereads the zones, not the settings above: allow-axfr-ips
+            # only takes effect on a restart, and until then AXFR is refused.
+            systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+            sleep 2
+            if systemctl is-active --quiet pdns 2>/dev/null || pgrep -x pdns_server >/dev/null; then
+                echo "[+] PowerDNS configured and restarted"
             else
-                echo "[!] Restart PowerDNS manually: systemctl restart pdns"
+                # Saying "OK" while the DNS server is down is worse than
+                # failing: restore what was there and let a human look.
+                [ -n "${PDNS_BAK:-}" ] && cp "$PDNS_BAK" "$PDNS_CONF"
+                systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                echo "[!] PowerDNS did not come back — configuration restored from the backup"
+                echo "[!] Check: journalctl -u pdns -n 20"
             fi
         fi
 

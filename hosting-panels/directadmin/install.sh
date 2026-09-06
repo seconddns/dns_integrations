@@ -344,7 +344,8 @@ if [ -n "$DNS_IPS" ]; then
 
         if [ "$ISSUES" -gt 0 ]; then
             if confirm "Apply PowerDNS fixes automatically? (backup will be created)"; then
-                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+                PDNS_BAK="${PDNS_CONF}.bak.$(date +%s)"
+                cp "$PDNS_CONF" "$PDNS_BAK"
 
                 grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
                 grep -qE "^default-soa-edit=" "$PDNS_CONF" || echo "default-soa-edit=INCEPTION-INCREMENT" >> "$PDNS_CONF"
@@ -364,7 +365,17 @@ if [ -n "$DNS_IPS" ]; then
                 fi
 
                 systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
-                echo "[+] PowerDNS configured and restarted"
+                sleep 2
+                if systemctl is-active --quiet pdns 2>/dev/null || pgrep -x pdns_server >/dev/null; then
+                    echo "[+] PowerDNS configured and restarted"
+                else
+                    # Saying "OK" while the DNS server is down is worse than
+                    # failing: restore what was there and let a human look.
+                    cp "$PDNS_BAK" "$PDNS_CONF"
+                    systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                    echo "[!] PowerDNS did not come back — configuration restored from the backup"
+                    echo "[!] Check: journalctl -u pdns -n 20"
+                fi
             fi
         else
             echo "[+] PowerDNS AXFR config OK"
