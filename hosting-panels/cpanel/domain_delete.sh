@@ -24,7 +24,9 @@ ZONE_NAME=$(echo "$STDIN_DATA" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    print(d.get('domain') or '')
+    # cPanel nests the event under "data"; older shapes put it at the top level
+    src = d.get('data') if isinstance(d.get('data'), dict) else d
+    print(src.get('domain') or src.get('newdomain') or '')
 except Exception:
     pass
 " 2>/dev/null)

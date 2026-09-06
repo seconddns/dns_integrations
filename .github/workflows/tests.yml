@@ -62,6 +62,9 @@ jobs:
       - name: test_pdns_restart.sh
         run: bash hosting-panels/common/tests/test_pdns_restart.sh
 
+      - name: test_cpanel_hook_payload.sh
+        run: bash hosting-panels/common/tests/test_cpanel_hook_payload.sh
+
       - name: test_cyberpanel_db.sh
         run: bash hosting-panels/common/tests/test_cyberpanel_db.sh
 
