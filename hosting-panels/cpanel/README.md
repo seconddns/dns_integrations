@@ -1,19 +1,25 @@
 # SecondDNS — cPanel/WHM Hosting Panel Integration
 
-> **Status: Beta — actively tested. Use in production at your own risk. Feedback welcome.**
-
 Automatic secondary DNS for cPanel/WHM servers. Uses the cPanel Standardized Hooks system to sync domain creation and deletion to SecondDNS via API + AXFR.
 
 ## How It Works
 
-Two shell scripts are registered as WHM hooks for 4 events:
+Three shell scripts are registered as WHM hooks:
 
-1. **Account created** (`Whostmgr::Accounts::Create`) — calls SecondDNS API to register the zone
-2. **Account removed** (`Whostmgr::Accounts::Remove`) — removes the zone from SecondDNS
-3. **Addon domain added** (`Api2::AddonDomain::addaddon`) — registers the addon domain zone
-4. **Addon domain deleted** (`Api2::AddonDomain::deladdondomain`) — removes the addon domain zone
+1. **Account created** (`Whostmgr::Accounts::Create`) — registers the zone
+2. **Account removed** (`Whostmgr::Accounts::Remove`, stage `pre`) — removes every zone of the account: main, addon and alias. The event carries only the username, so the domains are read from the account's userdata while it is still on disk
+3. **Domain added** (`Whostmgr::Domain::park`) — addon, alias and parked domains all arrive through this one
+4. **Domain removed** (`Whostmgr::Domain::unpark`)
+5. **Main domain renamed** (`Whostmgr::Accounts::Modify`, stage `pre`) — removes the old zone and registers the new one. WHM sends only the new name, so the old one is read from userdata before the change lands
 
-After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via BIND NOTIFY.
+The `Api2::AddonDomain::*` events are registered too, as a fallback for older cPanel that still fires them.
+
+After zone registration, SecondDNS pulls the full zone via AXFR. Subsequent changes propagate via NOTIFY.
+
+### IDN domains
+
+WHM does not accept Unicode in the domain field: enter an IDN in punycode
+(`xn--…`). The integration passes it through unchanged.
 
 ## Requirements
 

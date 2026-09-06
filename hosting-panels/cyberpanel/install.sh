@@ -192,12 +192,6 @@ if [ -z "$MASTER_IP" ]; then
     fi
 fi
 
-# Install CLI
-echo ""
-cp "$CYBER_SRC/seconddns.py" "$INSTALL_DIR/seconddns"
-chmod +x "$INSTALL_DIR/seconddns"
-echo "[+] Installed CLI to $INSTALL_DIR/seconddns"
-
 # Create or update config
 # A bad master IP installs cleanly and then fails every zone with an opaque
 # HTTP 400 from the API, so refuse here instead.
@@ -232,6 +226,8 @@ echo "[+] Log file: $LOG_FILE"
 # Install CyberPanel plugin
 if [ -d "$CYBERPANEL_DIR" ]; then
     cp "$CYBER_SRC/seconddns.py" "$PLUGIN_FILE"
+    # seconddns-signals.service runs it directly for ensure-signals
+    chmod +x "$PLUGIN_FILE"
     echo "[+] Installed plugin to $PLUGIN_FILE"
 
     # Clean and register signals
@@ -273,6 +269,9 @@ with open(p, 'w') as f: f.write(c)
 
 # --- Offline operation queue ---
 COMMON_SRC="$WORK_DIR/dns_integrations/hosting-panels/common"
+# the shared CLI, same commands and guards as on every other panel;
+# seconddns.py stays behind as the Django plugin only
+cp "$COMMON_SRC/seconddns" /usr/local/bin/seconddns
 cp "$COMMON_SRC/seconddns-domain" /usr/local/bin/seconddns-domain
 cp "$COMMON_SRC/seconddns-owner" /usr/local/bin/seconddns-owner
 cp "$COMMON_SRC/seconddns-migrate-master" /usr/local/bin/seconddns-migrate-master
@@ -281,7 +280,7 @@ cp "$COMMON_SRC/seconddns_common.py" /usr/local/bin/seconddns_common.py
 cp "$COMMON_SRC/seconddns-queue" /usr/local/bin/seconddns-queue
 cp "$COMMON_SRC/seconddns-queued" /usr/local/bin/seconddns-queued
 cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.service
-chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 bash "$COMMON_SRC/install-sqlite.sh"

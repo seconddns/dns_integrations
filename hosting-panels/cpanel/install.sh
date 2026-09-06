@@ -215,7 +215,7 @@ chmod 664 "$LOG_FILE"
 echo "[+] Log file: $LOG_FILE"
 
 # Install hook scripts
-for script in domain_create.sh domain_delete.sh; do
+for script in domain_create.sh domain_delete.sh domain_rename.sh; do
     curl -sf --max-time 10 -o "$SCRIPT_DIR/seconddns-cpanel-${script}" "$REPO_URL/$script?t=$(date +%s)"
     chmod +x "$SCRIPT_DIR/seconddns-cpanel-${script}"
     echo "[+] Installed: $SCRIPT_DIR/seconddns-cpanel-${script}"
@@ -225,6 +225,7 @@ done
 echo ""
 echo "--- Installing offline operation queue ---"
 COMMON_URL="${REPO_URL%/*}/common"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns "$COMMON_URL/seconddns?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-domain "$COMMON_URL/seconddns-domain?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-owner "$COMMON_URL/seconddns-owner?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-migrate-master "$COMMON_URL/seconddns-migrate-master?t=$(date +%s)"
@@ -233,7 +234,7 @@ curl -sf --max-time 10 -o /usr/local/bin/seconddns_common.py "$COMMON_URL/second
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-queue?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
-chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")
@@ -271,23 +272,41 @@ else
     echo "[!] Failed: Whostmgr::Accounts::Remove"
 fi
 
-# cPanel addon domain create (post)
-if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_create.sh" \
-    --category Api2 --event AddonDomain::addaddon --stage post 2>/dev/null; then
-    echo "[+] Registered: Api2::AddonDomain::addaddon (post)"
+# Renaming an account's main domain: WHM sends the new name and keeps the old
+# one on disk until this hook returns, so it runs at stage pre.
+if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_rename.sh" \
+    --category Whostmgr --event Accounts::Modify --stage pre 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Accounts::Modify (pre)"
     REGISTERED=$((REGISTERED+1))
 else
-    echo "[!] Failed: Api2::AddonDomain::addaddon"
+    echo "[!] Failed: Whostmgr::Accounts::Modify"
 fi
 
-# cPanel addon domain delete (post)
-if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
-    --category Api2 --event AddonDomain::deladdondomain --stage post 2>/dev/null; then
-    echo "[+] Registered: Api2::AddonDomain::deladdondomain (post)"
+# Addon, parked and alias domains all go through park/unpark; the Api2
+# AddonDomain events are not fired by current cPanel and are kept as a fallback.
+if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_create.sh" \
+    --category Whostmgr --event Domain::park --stage post 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Domain::park (post)"
     REGISTERED=$((REGISTERED+1))
 else
-    echo "[!] Failed: Api2::AddonDomain::deladdondomain"
+    echo "[!] Failed: Whostmgr::Domain::park"
 fi
+
+if "$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
+    --category Whostmgr --event Domain::unpark --stage pre 2>/dev/null; then
+    echo "[+] Registered: Whostmgr::Domain::unpark (pre)"
+    REGISTERED=$((REGISTERED+1))
+else
+    echo "[!] Failed: Whostmgr::Domain::unpark"
+fi
+
+# older cPanel: the Api2 addon events, harmless where they never fire
+"$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_create.sh" \
+    --category Api2 --event AddonDomain::addaddondomain --stage post &>/dev/null \
+    && echo "[+] Registered: Api2::AddonDomain::addaddondomain (post)"
+"$HOOKS_BIN" add script "$SCRIPT_DIR/seconddns-cpanel-domain_delete.sh" \
+    --category Api2 --event AddonDomain::deladdondomain --stage post &>/dev/null \
+    && echo "[+] Registered: Api2::AddonDomain::deladdondomain (post)"
 
 echo "[+] Registered $REGISTERED hooks"
 
@@ -350,7 +369,8 @@ else
         if [ ! -f "$PDNS_CONF" ]; then
             echo "[!] pdns.conf not found at $PDNS_CONF — configure AXFR manually"
         else
-            cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+            PDNS_BAK="${PDNS_CONF}.bak.$(date +%s)"
+            cp "$PDNS_CONF" "$PDNS_BAK"
 
             # primary / master mode (name differs by pdns version)
             if grep -q "^master=" "$PDNS_CONF" 2>/dev/null; then
@@ -400,13 +420,19 @@ else
                 echo "[+] PowerDNS: also-notify=$SECONDARY_IP"
             fi
 
-            # Reload
-            if systemctl reload pdns &>/dev/null 2>&1; then
-                echo "[+] PowerDNS reloaded"
-            elif pdns_control reload &>/dev/null 2>&1; then
-                echo "[+] PowerDNS reloaded via pdns_control"
+            # A reload rereads the zones, not the settings above: allow-axfr-ips
+            # only takes effect on a restart, and until then AXFR is refused.
+            systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+            sleep 2
+            if systemctl is-active --quiet pdns 2>/dev/null || pgrep -x pdns_server >/dev/null; then
+                echo "[+] PowerDNS configured and restarted"
             else
-                echo "[!] Restart PowerDNS manually: systemctl restart pdns"
+                # Saying "OK" while the DNS server is down is worse than
+                # failing: restore what was there and let a human look.
+                [ -n "${PDNS_BAK:-}" ] && cp "$PDNS_BAK" "$PDNS_CONF"
+                systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                echo "[!] PowerDNS did not come back — configuration restored from the backup"
+                echo "[!] Check: journalctl -u pdns -n 20"
             fi
         fi
 
@@ -502,39 +528,6 @@ if [ -n "$API_NS" ]; then
     fi
 fi
 
-# Initial sync
-echo ""
-if confirm "Sync existing cPanel accounts to secondary DNS now?"; then
-    echo "[*] Syncing accounts..."
-    added=0
-    failed=0
-
-    if [ -d /var/cpanel/users ]; then
-        for user_file in /var/cpanel/users/*; do
-            [ -f "$user_file" ] || continue
-            sdomain=$(grep "^DNS=" "$user_file" 2>/dev/null | cut -d= -f2)
-            [ -z "$sdomain" ] && continue
-
-            response=$(curl -sf --max-time 15 \
-                -X POST \
-                -H "X-API-Key: $API_KEY" \
-                -H "Content-Type: application/json" \
-                -H "User-Agent: SecondDNS-cPanel/1.0" \
-                -d "{\"name\":\"$sdomain\",\"masterIp\":\"$MASTER_IP\"}" \
-                "$API_URL/api/zones" 2>/dev/null)
-            if [ $? -eq 0 ]; then
-                echo "    [+] $sdomain"
-                added=$((added+1))
-            else
-                failed=$((failed+1))
-            fi
-        done
-    else
-        echo "[!] /var/cpanel/users not found — skipping sync"
-    fi
-
-    echo "[+] Synced: $added domains, failed: $failed"
-fi
 
 echo ""
 # reconcile already knows where each panel keeps its zone list; --add-missing
@@ -553,6 +546,7 @@ echo "=== Installation complete ==="
 echo ""
 echo "  Config:   $CONFIG_FILE"
 echo "  Scripts:  $SCRIPT_DIR/seconddns-cpanel-domain_create.sh"
+echo "            $SCRIPT_DIR/seconddns-cpanel-domain_rename.sh"
 echo "            $SCRIPT_DIR/seconddns-cpanel-domain_delete.sh"
 echo "  Logs:     tail -f $LOG_FILE"
 echo ""

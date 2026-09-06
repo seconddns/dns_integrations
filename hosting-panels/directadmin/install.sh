@@ -222,6 +222,7 @@ done
 echo ""
 echo "--- Installing offline operation queue ---"
 COMMON_URL="${REPO_URL%/*}/common"
+curl -sf --max-time 10 -o /usr/local/bin/seconddns "$COMMON_URL/seconddns?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-domain "$COMMON_URL/seconddns-domain?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-owner "$COMMON_URL/seconddns-owner?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-migrate-master "$COMMON_URL/seconddns-migrate-master?t=$(date +%s)"
@@ -230,7 +231,7 @@ curl -sf --max-time 10 -o /usr/local/bin/seconddns_common.py "$COMMON_URL/second
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-queue?t=$(date +%s)"
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
-chmod +x /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")
@@ -343,7 +344,8 @@ if [ -n "$DNS_IPS" ]; then
 
         if [ "$ISSUES" -gt 0 ]; then
             if confirm "Apply PowerDNS fixes automatically? (backup will be created)"; then
-                cp "$PDNS_CONF" "${PDNS_CONF}.bak.$(date +%s)"
+                PDNS_BAK="${PDNS_CONF}.bak.$(date +%s)"
+                cp "$PDNS_CONF" "$PDNS_BAK"
 
                 grep -qE "^master=yes" "$PDNS_CONF" || echo "master=yes" >> "$PDNS_CONF"
                 grep -qE "^default-soa-edit=" "$PDNS_CONF" || echo "default-soa-edit=INCEPTION-INCREMENT" >> "$PDNS_CONF"
@@ -363,7 +365,17 @@ if [ -n "$DNS_IPS" ]; then
                 fi
 
                 systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
-                echo "[+] PowerDNS configured and restarted"
+                sleep 2
+                if systemctl is-active --quiet pdns 2>/dev/null || pgrep -x pdns_server >/dev/null; then
+                    echo "[+] PowerDNS configured and restarted"
+                else
+                    # Saying "OK" while the DNS server is down is worse than
+                    # failing: restore what was there and let a human look.
+                    cp "$PDNS_BAK" "$PDNS_CONF"
+                    systemctl restart pdns 2>/dev/null || service pdns restart 2>/dev/null
+                    echo "[!] PowerDNS did not come back — configuration restored from the backup"
+                    echo "[!] Check: journalctl -u pdns -n 20"
+                fi
             fi
         else
             echo "[+] PowerDNS AXFR config OK"
