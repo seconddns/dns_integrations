@@ -2,6 +2,8 @@
 # Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
 """Shared bits for the SecondDNS command-line tools (config, API, panel domains)."""
+import base64
+import binascii
 import configparser
 import json
 import os
@@ -212,3 +214,37 @@ def enqueue(op, domain, master_ip=""):
     """Hand an operation to the local queue. Returns True when accepted."""
     r = subprocess.run([QUEUE_BIN, "enqueue", op, domain, master_ip], capture_output=True, text=True)
     return r.returncode == 0
+
+
+# Secret length per algorithm; keys created in the dashboard use exactly these.
+TSIG_SECRET_BYTES = {"hmac-sha256": 32, "hmac-sha512": 64}
+
+
+def resolve_tsig_key(cfg, label=None):
+    """The account's TSIG key by label, or its default key. Returns (key, error)."""
+    code, keys = api(cfg, "GET", "/api/user/tsig-keys", ua="SecondDNS-Tsig/1.0")
+    if code != 200 or not isinstance(keys, list):
+        return None, f"GET /api/user/tsig-keys failed: HTTP {code}"
+    if label:
+        key = next((k for k in keys if k.get("label") == label), None)
+        if not key:
+            return None, f"no TSIG key labelled '{label}' in this account"
+    else:
+        key = next((k for k in keys if k.get("isDefault")), None)
+        if not key:
+            return None, "the account has no default TSIG key; pass --key=<label> or set a default in Settings › DNS"
+    return key, None
+
+
+def check_tsig_secret(algorithm, secret):
+    """None when the secret fits the algorithm, else the reason."""
+    want = TSIG_SECRET_BYTES.get(algorithm)
+    if not want:
+        return f"unsupported algorithm {algorithm}"
+    try:
+        raw = base64.b64decode(secret, validate=True)
+    except (binascii.Error, ValueError):
+        return "the secret is not valid base64"
+    if len(raw) != want:
+        return f"the secret is {len(raw)} bytes, {algorithm} keys are {want}"
+    return None

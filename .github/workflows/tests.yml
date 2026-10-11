@@ -41,6 +41,9 @@ jobs:
       - name: test_queue.sh
         run: bash hosting-panels/common/tests/test_queue.sh
 
+      - name: test_tsig.sh
+        run: bash hosting-panels/common/tests/test_tsig.sh
+
       - name: test_valid_ip.sh
         run: bash hosting-panels/common/tests/test_valid_ip.sh
 
