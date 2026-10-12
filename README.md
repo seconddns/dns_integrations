@@ -125,7 +125,7 @@ Both integrations use the SecondDNS API key. See the README in each directory fo
 
 - SecondDNS account and API key — [get one here](https://seconddns.com/dashboard/api-key)
 - TCP port 53 open from your server to the SecondDNS secondary nameserver IP
-- BIND or PowerDNS with `allow-transfer` and `also-notify` for the secondary IP — the installer configures this after asking, and keeps a backup of the file it edits
+- BIND or PowerDNS with `allow-transfer` and `also-notify` for the secondary IP — the installer configures this after asking, and keeps a backup of the file it edits (on Plesk, transfers are opened through the Transfer Restrictions Template instead, see [Plesk](hosting-panels/plesk/))
 
 ---
 
