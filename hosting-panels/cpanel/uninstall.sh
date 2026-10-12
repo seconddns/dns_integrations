@@ -35,6 +35,9 @@ if ! confirm "Remove SecondDNS cPanel integration?"; then
     exit 0
 fi
 
+# TSIG off first: our IP back in allow-transfer, zones unsigned, key removed, while the config and the tool still exist
+[ -x /usr/local/bin/seconddns-tsig ] && /usr/local/bin/seconddns-tsig disable --zones || true
+
 # Remove hooks
 if [ -x "$HOOKS_BIN" ]; then
     echo "[*] Removing hooks..."
@@ -106,7 +109,7 @@ systemctl disable --now seconddns-queued.service 2>/dev/null
 rm -f /etc/systemd/system/seconddns-queued.service
 systemctl daemon-reload 2>/dev/null
 rm -f /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns_common.py /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
-rm -f /usr/local/bin/seconddns-tsig /etc/seconddns/tsig.secret
+rm -f /usr/local/bin/seconddns-tsig /usr/local/bin/seconddns_bind.py /etc/seconddns/tsig.secret
 rmdir /etc/seconddns 2>/dev/null || true
 if [ -f /var/lib/seconddns/queue.db ] && command -v sqlite3 &>/dev/null; then
     n=$(sqlite3 /var/lib/seconddns/queue.db "SELECT COUNT(*) FROM ops WHERE status='pending';" 2>/dev/null || echo 0)

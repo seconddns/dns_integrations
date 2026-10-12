@@ -44,6 +44,19 @@ jobs:
       - name: test_tsig.sh
         run: bash hosting-panels/common/tests/test_tsig.sh
 
+      - name: test_tsig_bind.sh
+        run: bash hosting-panels/common/tests/test_tsig_bind.sh
+
+      # a real named: the apparmor profile would keep it out of the test's temp dir
+      - name: test_tsig_bind_named.sh
+        run: |
+          sudo apt-get install -y -qq bind9 bind9-utils dnsutils
+          sudo apparmor_parser -R /etc/apparmor.d/usr.sbin.named 2>/dev/null || true
+          out=$(bash hosting-panels/common/tests/test_tsig_bind_named.sh); rc=$?
+          echo "$out"
+          echo "$out" | grep -q '^skipped' && { echo "::error::BIND missing on the runner"; exit 1; }
+          exit $rc
+
       - name: test_valid_ip.sh
         run: bash hosting-panels/common/tests/test_valid_ip.sh
 

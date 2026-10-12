@@ -282,6 +282,7 @@ cp "$COMMON_SRC/seconddns-queued" /usr/local/bin/seconddns-queued
 cp "$COMMON_SRC/seconddns-queued.service" /etc/systemd/system/seconddns-queued.service
 chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 cp "$COMMON_SRC/seconddns-tsig" /usr/local/bin/seconddns-tsig && chmod +x /usr/local/bin/seconddns-tsig
+cp "$COMMON_SRC/seconddns_bind.py" /usr/local/bin/seconddns_bind.py
 bash "$COMMON_SRC/install-idn2.sh"
 mkdir -p /var/lib/seconddns
 bash "$COMMON_SRC/install-sqlite.sh"
