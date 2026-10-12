@@ -53,12 +53,12 @@ for panel in cpanel plesk directadmin; do
         && ok "braces balanced ($opened)" || fail "braces unbalanced: $opened open, $closed closed"
 
     if command -v named-checkconf >/dev/null 2>&1; then
-        # the fixture names /var/named and an include from a real cPanel host; give
-        # named-checkconf a root that has them, or it rejects the untouched file too
+        # the fixture names /var/named and an include from a real cPanel host, which the
+        # runner lacks; point those paths at a scratch copy (no chroot: CI is not root)
         root="$TMP/root-$panel"
         mkdir -p "$root/var/named" && touch "$root/var/named/named.rfc1912.zones"
-        cp "$f" "$root/named.conf"
-        named-checkconf -t "$root" /named.conf >/dev/null 2>&1 && ok "named-checkconf accepts it" || fail "named-checkconf rejects it: $(named-checkconf -t "$root" /named.conf 2>&1 | head -1)"
+        sed "s|\"/var/named|\"$root/var/named|g" "$f" > "$root/named.conf"
+        named-checkconf "$root/named.conf" >/dev/null 2>&1 && ok "named-checkconf accepts it" || fail "named-checkconf rejects it: $(named-checkconf "$root/named.conf" 2>&1 | head -1)"
     fi
 done
 
