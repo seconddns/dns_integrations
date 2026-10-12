@@ -92,6 +92,7 @@ def load_config():
         "api_url": api_url.rstrip("/"),
         "api_key": api_key,
         "delete_check_master_ip": cp.getboolean("seconddns", "delete_check_master_ip", fallback=True),
+        "tsig_key_id": cp.get("tsig", "key_id", fallback="").strip(),
         "poll_interval": cp.getint("queue", "poll_interval", fallback=60),
         "http_timeout": cp.getint("queue", "http_timeout", fallback=15),
         "backoff_min": cp.getint("queue", "backoff_min", fallback=30),
@@ -226,8 +227,10 @@ def detail(code, data):
 def send_op(cfg, op, domain, master_ip):
     """Deliver one operation. Returns (DONE / RETRY / FAILED, detail string)."""
     if op == "create":
-        code, data = api(cfg, "POST", "/api/zones",
-                         {"name": domain, "masterIp": master_ip})
+        payload = {"name": domain, "masterIp": master_ip}
+        if cfg["tsig_key_id"]:
+            payload["tsigKeyId"] = cfg["tsig_key_id"]
+        code, data = api(cfg, "POST", "/api/zones", payload)
         if code in (200, 201):
             return DONE, detail(code, data)
         if code == 409:
@@ -243,6 +246,8 @@ def send_op(cfg, op, domain, master_ip):
                 log(f"[~] worker: zone {domain} already exists (treated as success)")
             return DONE, detail(code, data)
         if code in (400, 422):
+            if code == 422 and cfg["tsig_key_id"]:
+                log(f"[!] worker: zone {domain} rejected with TSIG key {cfg['tsig_key_id']} — key deleted from the account? rerun the installer with the new key")
             return FAILED, detail(code, data)
         return RETRY, detail(code, data)
 

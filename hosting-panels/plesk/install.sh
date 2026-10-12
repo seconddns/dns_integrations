@@ -275,6 +275,7 @@ curl -sf --max-time 10 -o /usr/local/bin/seconddns-queue "$COMMON_URL/seconddns-
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns-queued?t=$(date +%s)"
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
 chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
+curl -sf --max-time 10 -o /usr/local/bin/seconddns-tsig "$COMMON_URL/seconddns-tsig?t=$(date +%s)" && chmod +x /usr/local/bin/seconddns-tsig
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")

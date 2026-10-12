@@ -2,6 +2,8 @@
 # Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
 # See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
 """Shared bits for the SecondDNS command-line tools (config, API, panel domains)."""
+import base64
+import binascii
 import configparser
 import json
 import os
@@ -212,3 +214,47 @@ def enqueue(op, domain, master_ip=""):
     """Hand an operation to the local queue. Returns True when accepted."""
     r = subprocess.run([QUEUE_BIN, "enqueue", op, domain, master_ip], capture_output=True, text=True)
     return r.returncode == 0
+
+
+# Secret length per algorithm; keys created in the dashboard use exactly these.
+TSIG_SECRET_BYTES = {"hmac-sha256": 32, "hmac-sha512": 64}
+
+
+def resolve_tsig_key(cfg, ref):
+    """The account's TSIG key by label or full name, as shown in Settings › DNS. Returns (key, error)."""
+    code, keys = api(cfg, "GET", "/api/user/tsig-keys", ua="SecondDNS-Tsig/1.0")
+    if code != 200 or not isinstance(keys, list):
+        return None, f"GET /api/user/tsig-keys failed: HTTP {code}"
+    key = next((k for k in keys if ref and ref in (k.get("label"), k.get("name"))), None)
+    if key:
+        return key, None
+    have = ", ".join(f"{k.get('name')} ({k.get('label')})" for k in keys) or "none — create one in Settings › DNS"
+    return None, f"no TSIG key '{ref}' in this account; keys: {have}"
+
+
+def parse_tsig_pair(value):
+    """'[algorithm:]key:secret', as dig -y takes it. Returns (algorithm or None, key, secret, error)."""
+    parts = (value or "").split(":")
+    if len(parts) == 2:
+        algorithm, (ref, secret) = None, parts
+    elif len(parts) == 3:
+        algorithm, ref, secret = parts
+    else:
+        return None, None, None, "expected --tsig=KEY:SECRET (or ALGORITHM:KEY:SECRET)"
+    if not ref or not secret:
+        return None, None, None, "both the key and the secret are needed: --tsig=KEY:SECRET"
+    return algorithm, ref, secret, None
+
+
+def check_tsig_secret(algorithm, secret):
+    """None when the secret fits the algorithm, else the reason."""
+    want = TSIG_SECRET_BYTES.get(algorithm)
+    if not want:
+        return f"unsupported algorithm {algorithm}"
+    try:
+        raw = base64.b64decode(secret, validate=True)
+    except (binascii.Error, ValueError):
+        return "the secret is not valid base64"
+    if len(raw) != want:
+        return f"the secret is {len(raw)} bytes, {algorithm} keys are {want}"
+    return None

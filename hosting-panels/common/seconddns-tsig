@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+# Copyright © 2025-2026 SecondDNS
+# Licensed under GNU General Public License v3.0 or SecondDNS Commercial License
+# See LICENSE (GPLv3) or LICENSE.COMMERCIAL (commercial) for details
+"""TSIG key of this panel server, for the installers.
+
+  seconddns-tsig resolve --tsig=[ALGORITHM:]KEY:SECRET [--write]
+        find KEY in the account by its label or full name (as in Settings › DNS), check
+        the secret against it and print "id name algorithm"; --write stores them in the
+        [tsig] section, and the secret in a root-only file
+  seconddns-tsig status                            the key this server uses, and whether the
+                                                  account still has it
+  seconddns-tsig check-secret ALGORITHM SECRET     exit 0 when the secret fits the algorithm
+  seconddns-tsig secret                            print the stored secret (root)
+  seconddns-tsig clear                             remove the [tsig] section and the secret file
+
+The config is world-readable (panel hooks read it as non-root users), so the secret lives in
+/etc/seconddns/tsig.secret (0600) and the config only names that file. It is kept so the key
+can be put back on the panel's DNS server when the panel rewrites its configuration.
+With a [tsig] section, seconddns-queued creates zones with that key (tsigKeyId).
+"""
+import argparse
+import configparser
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from seconddns_common import load_config, resolve_tsig_key, check_tsig_secret, parse_tsig_pair  # noqa: E402
+
+
+def write_section(path, body):
+    """Replace or drop the [tsig] section, leaving the rest of the file as it is."""
+    with open(path) as f:
+        text = f.read()
+    text = re.sub(r"(?ms)^\[tsig\]\n.*?(?=^\[|\Z)", "", text).rstrip("\n") + "\n"
+    if body:
+        text += "\n[tsig]\n" + body
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.replace(tmp, path)
+
+
+SECRET_FILE = os.environ.get("SECONDDNS_TSIG_SECRET", "/etc/seconddns/tsig.secret")
+
+
+def write_secret(secret):
+    os.makedirs(os.path.dirname(SECRET_FILE), mode=0o700, exist_ok=True)
+    fd = os.open(SECRET_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(secret + "\n")
+    os.replace(SECRET_FILE + ".tmp", SECRET_FILE)
+
+
+def stored_secret_file(path):
+    cp = configparser.ConfigParser()
+    cp.read(path)
+    return cp.get("tsig", "secret_file", fallback="").strip()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", default=os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf"))
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("resolve")
+    r.add_argument("--tsig", metavar="[ALGORITHM:]KEY:SECRET", required=True)
+    r.add_argument("--write", action="store_true")
+    c = sub.add_parser("check-secret")
+    c.add_argument("algorithm")
+    c.add_argument("secret")
+    sub.add_parser("secret")
+    sub.add_parser("status")
+    sub.add_parser("clear")
+    a = ap.parse_args()
+
+    if a.cmd == "check-secret":
+        why = check_tsig_secret(a.algorithm, a.secret)
+        if why:
+            sys.exit(why)
+        return
+
+    if a.cmd == "secret":
+        f = stored_secret_file(a.config)
+        if not f:
+            sys.exit("no TSIG secret stored")
+        with open(f) as fh:
+            print(fh.read().strip())
+        return
+
+    if a.cmd == "status":
+        cp = configparser.ConfigParser()
+        cp.read(a.config)
+        if not cp.has_section("tsig"):
+            print("TSIG: off (zones are transferred without a key)")
+            return
+        t = cp["tsig"]
+        print(f"TSIG key: {t.get('key_name')} ({t.get('algorithm')}), id {t.get('key_id')}")
+        print(f"secret:   {'stored' if t.get('secret_file') and os.path.exists(t.get('secret_file')) else 'not stored'}")
+        key, err = resolve_tsig_key(load_config(a.config), t.get("key_name"))
+        if err:
+            sys.exit(f"account:  {err}")
+        if key["id"] != t.get("key_id"):
+            sys.exit(f"account:  a key named {key['name']} exists with another id ({key['id']}); it was recreated — run enable again")
+        print(f"account:  present, label '{key['label']}'")
+        return
+
+    if a.cmd == "clear":
+        f = stored_secret_file(a.config)
+        write_section(a.config, "")
+        if f and os.path.exists(f):
+            os.remove(f)
+        return
+
+    algorithm, ref, secret, err = parse_tsig_pair(a.tsig)
+    if err:
+        sys.exit(err)
+    key, err = resolve_tsig_key(load_config(a.config), ref)
+    if err:
+        sys.exit(err)
+    if algorithm and algorithm != key["algorithm"]:
+        sys.exit(f"{key['name']} is {key['algorithm']}, not {algorithm}")
+    why = check_tsig_secret(key["algorithm"], secret)
+    if why:
+        sys.exit(f"{key['name']}: {why}")
+    if a.write:
+        write_secret(secret)
+        write_section(a.config, f"key_id = {key['id']}\nkey_name = {key['name']}\nalgorithm = {key['algorithm']}\nsecret_file = {SECRET_FILE}\n")
+    print(key["id"], key["name"], key["algorithm"])
+
+
+if __name__ == "__main__":
+    main()
