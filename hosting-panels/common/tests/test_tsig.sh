@@ -76,13 +76,18 @@ SECRET256=$(python3 -c 'import base64,os;print(base64.b64encode(os.urandom(32)).
 SECRET512=$(python3 -c 'import base64,os;print(base64.b64encode(os.urandom(64)).decode())')
 write_conf
 
-echo "== 1. resolve: default key, label, errors"
+echo "== 1. resolve: one KEY:SECRET pair, key by label or full name"
 echo "$KEYS_TWO" > "$TMP/keys"
-assert_eq "$("$TSIG" resolve)" "k2 acct-web hmac-sha512" "no label picks the default key"
-assert_eq "$("$TSIG" resolve --key=main)" "k1 acct-main hmac-sha256" "label picks that key"
-"$TSIG" resolve --key=nope > /dev/null 2>&1 && fail "unknown label accepted" || ok "unknown label exits non-zero"
-echo '[{"id":"k1","label":"main","name":"acct-main","algorithm":"hmac-sha256","isDefault":false}]' > "$TMP/keys"
-"$TSIG" resolve > /dev/null 2>&1 && fail "no default key accepted" || ok "no default and no label exits non-zero"
+"$TSIG" resolve > /dev/null 2>&1 && fail "resolve without --tsig accepted" || ok "resolve without --tsig refused"
+"$TSIG" resolve --tsig=main > /dev/null 2>&1 && fail "key without a secret accepted" || ok "key without a secret refused"
+assert_eq "$("$TSIG" resolve --tsig="main:$SECRET256")" "k1 acct-main hmac-sha256" "label picks that key"
+assert_eq "$("$TSIG" resolve --tsig="acct-web:$SECRET512")" "k2 acct-web hmac-sha512" "full name picks that key"
+assert_eq "$("$TSIG" resolve --tsig="hmac-sha256:acct-main:$SECRET256")" "k1 acct-main hmac-sha256" "dig -y form with the algorithm"
+"$TSIG" resolve --tsig="hmac-sha512:main:$SECRET256" > /dev/null 2>&1 && fail "wrong algorithm prefix accepted" || ok "algorithm prefix must match the key"
+"$TSIG" resolve --tsig="web:$SECRET256" > /dev/null 2>&1 && fail "secret of the wrong length accepted" || ok "secret checked against the key's algorithm"
+err=$("$TSIG" resolve --tsig="nope:$SECRET256" 2>&1 >/dev/null); rc=$?
+[ "$rc" -ne 0 ] && ok "unknown key exits non-zero" || fail "unknown key accepted"
+echo "$err" | grep -q "acct-main (main), acct-web (web)" && ok "the error lists the account's keys" || fail "the error does not list the keys: $err"
 
 echo "== 2. check-secret"
 "$TSIG" check-secret hmac-sha256 "$SECRET256" && ok "32-byte secret fits hmac-sha256" || fail "32-byte secret rejected"
@@ -93,9 +98,9 @@ echo "== 2. check-secret"
 
 echo "== 3. resolve --write: section and secret file"
 echo "$KEYS_TWO" > "$TMP/keys"
-"$TSIG" resolve --key=main --write --secret="$SECRET512" > /dev/null 2>&1 && fail "secret of the wrong length written" || ok "wrong-length secret refused before writing"
+"$TSIG" resolve --tsig="main:$SECRET512" --write > /dev/null 2>&1 && fail "secret of the wrong length written" || ok "wrong-length secret refused before writing"
 [ -e "$SECONDDNS_TSIG_SECRET" ] && fail "secret file created by a refused write" || ok "nothing written on refusal"
-"$TSIG" resolve --key=main --write --secret="$SECRET256" > /dev/null
+"$TSIG" resolve --tsig="main:$SECRET256" --write > /dev/null
 section=$(python3 -c "import configparser,sys;c=configparser.ConfigParser();c.read(sys.argv[1]);print(c['tsig']['key_id'],c['tsig']['key_name'],c['tsig']['algorithm'],c['tsig']['secret_file'])" "$SECONDDNS_CONF")
 assert_eq "$section" "k1 acct-main hmac-sha256 $SECONDDNS_TSIG_SECRET" "[tsig] section written"
 grep -q "$SECRET256" "$SECONDDNS_CONF" && fail "secret leaked into the world-readable config" || ok "secret not in the config"
@@ -103,12 +108,24 @@ assert_eq "$(stat -c %a "$SECONDDNS_TSIG_SECRET" 2>/dev/null || stat -f %Lp "$SE
 assert_eq "$("$TSIG" secret)" "$SECRET256" "secret reads back"
 grep -q '^api_key = test-key$' "$SECONDDNS_CONF" && ok "rest of the config kept" || fail "rest of the config lost"
 assert_eq "$(stat -c %a "$SECONDDNS_CONF" 2>/dev/null || stat -f %Lp "$SECONDDNS_CONF")" 644 "config mode kept"
-"$TSIG" resolve --write > /dev/null
+"$TSIG" resolve --tsig="web:$SECRET512" --write > /dev/null
 assert_eq "$(grep -c '^\[tsig\]' "$SECONDDNS_CONF")" 1 "rewrite keeps one [tsig] section"
 assert_eq "$(python3 -c "import configparser,sys;c=configparser.ConfigParser();c.read(sys.argv[1]);print(c['tsig']['key_id'])" "$SECONDDNS_CONF")" k2 "rewrite replaces the key"
 
-echo "== 4. queue sends tsigKeyId only with a [tsig] section"
-"$TSIG" resolve --key=main --write --secret="$SECRET256" > /dev/null
+echo "== 4. status"
+"$TSIG" resolve --tsig="main:$SECRET256" --write > /dev/null
+out=$("$TSIG" status); rc=$?
+assert_eq "$rc" 0 "status exits 0 while the key is in the account"
+echo "$out" | grep -q "TSIG key: acct-main (hmac-sha256), id k1" && ok "status names the key" || fail "status output: $out"
+echo "$out" | grep -q "label 'main'" && ok "status shows the label" || fail "status label: $out"
+echo '[{"id":"k9","label":"main","name":"acct-main","algorithm":"hmac-sha256","isDefault":false}]' > "$TMP/keys"
+"$TSIG" status > /dev/null 2>&1 && fail "recreated key reported as fine" || ok "recreated key (new id) exits non-zero"
+echo '[]' > "$TMP/keys"
+"$TSIG" status > /dev/null 2>&1 && fail "deleted key reported as fine" || ok "deleted key exits non-zero"
+echo "$KEYS_TWO" > "$TMP/keys"
+
+echo "== 5. queue sends tsigKeyId only with a [tsig] section"
+"$TSIG" resolve --tsig="main:$SECRET256" --write > /dev/null
 : > "$TMP/posts.log"
 "$QUEUE" enqueue create signed.example.com 192.0.2.10 && "$QUEUE" flush
 assert_eq "$(python3 -c "import json,sys;print(json.loads(open(sys.argv[1]).readline()).get('tsigKeyId'))" "$TMP/posts.log")" k1 "create carries tsigKeyId"
@@ -118,6 +135,7 @@ grep -q "rejected with TSIG key k1" "$SECONDDNS_LOG" && ok "422 with a key is lo
 rm -f "$TMP/mode"
 "$TSIG" clear
 grep -q '^\[tsig\]' "$SECONDDNS_CONF" && fail "clear left the section" || ok "clear removes the section"
+assert_eq "$("$TSIG" status)" "TSIG: off (zones are transferred without a key)" "status after clear"
 [ -e "$SECONDDNS_TSIG_SECRET" ] && fail "clear left the secret file" || ok "clear removes the secret file"
 : > "$TMP/posts.log"
 "$QUEUE" enqueue create plain.example.com 192.0.2.10 && "$QUEUE" flush

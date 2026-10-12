@@ -220,20 +220,30 @@ def enqueue(op, domain, master_ip=""):
 TSIG_SECRET_BYTES = {"hmac-sha256": 32, "hmac-sha512": 64}
 
 
-def resolve_tsig_key(cfg, label=None):
-    """The account's TSIG key by label, or its default key. Returns (key, error)."""
+def resolve_tsig_key(cfg, ref):
+    """The account's TSIG key by label or full name, as shown in Settings › DNS. Returns (key, error)."""
     code, keys = api(cfg, "GET", "/api/user/tsig-keys", ua="SecondDNS-Tsig/1.0")
     if code != 200 or not isinstance(keys, list):
         return None, f"GET /api/user/tsig-keys failed: HTTP {code}"
-    if label:
-        key = next((k for k in keys if k.get("label") == label), None)
-        if not key:
-            return None, f"no TSIG key labelled '{label}' in this account"
+    key = next((k for k in keys if ref and ref in (k.get("label"), k.get("name"))), None)
+    if key:
+        return key, None
+    have = ", ".join(f"{k.get('name')} ({k.get('label')})" for k in keys) or "none — create one in Settings › DNS"
+    return None, f"no TSIG key '{ref}' in this account; keys: {have}"
+
+
+def parse_tsig_pair(value):
+    """'[algorithm:]key:secret', as dig -y takes it. Returns (algorithm or None, key, secret, error)."""
+    parts = (value or "").split(":")
+    if len(parts) == 2:
+        algorithm, (ref, secret) = None, parts
+    elif len(parts) == 3:
+        algorithm, ref, secret = parts
     else:
-        key = next((k for k in keys if k.get("isDefault")), None)
-        if not key:
-            return None, "the account has no default TSIG key; pass --key=<label> or set a default in Settings › DNS"
-    return key, None
+        return None, None, None, "expected --tsig=KEY:SECRET (or ALGORITHM:KEY:SECRET)"
+    if not ref or not secret:
+        return None, None, None, "both the key and the secret are needed: --tsig=KEY:SECRET"
+    return algorithm, ref, secret, None
 
 
 def check_tsig_secret(algorithm, secret):
