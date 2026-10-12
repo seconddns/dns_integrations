@@ -140,16 +140,35 @@ def reload_named():
     return False
 
 
-def write_key_file(path, key, secret, like):
-    """Key file readable by named: mode 0640, group of the named config it sits next to."""
+def named_gid():
+    """Group named runs as, read from the process: the options file may be root:root
+    while named runs as named or bind."""
+    forced = os.environ.get("SECONDDNS_NAMED_GID")
+    if forced:
+        return int(forced)
+    r = subprocess.run(["pgrep", "-x", os.environ.get("SECONDDNS_NAMED_PROC", "named")], capture_output=True, text=True)
+    for pid in r.stdout.split():
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("Gid:"):
+                        return int(line.split()[1])
+        except OSError:
+            continue
+    sys.exit("cannot determine the group named runs as; key file not written")
+
+
+def write_key_file(path, key, secret):
+    """Key file readable by named only: mode 0640, root and named's group."""
+    gid = named_gid()
     tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
     with os.fdopen(fd, "w") as f:
         f.write(bind.key_block(key["name"], key["algorithm"], secret))
     try:
-        os.chown(tmp, 0, os.stat(like).st_gid)
+        os.chown(tmp, 0, gid)
     except PermissionError:
-        pass  # tests run unprivileged
+        os.chown(tmp, -1, gid)  # unprivileged runs (tests): at least the group
     os.chmod(tmp, 0o640)
     os.replace(tmp, path)
 
@@ -171,8 +190,12 @@ def edit_named(options, change):
     if not checkconf_ok():
         shutil.copy2(backup, options)
         sys.exit(f"{options}: named-checkconf rejected the change; restored from {backup}")
+    # named-checkconf does not read key files the way named does: a reload that fails
+    # here would leave a config the next named restart cannot load
     if not reload_named():
-        print("[!] named did not reload; run: rndc reload", file=sys.stderr)
+        shutil.copy2(backup, options)
+        reload_named()
+        sys.exit(f"{options}: named did not reload the change; restored from {backup}")
     return True
 
 
@@ -184,7 +207,7 @@ def add_key_to_bind(key, secret, options):
     """Key file, include, and the key added to allow-transfer next to whatever is there."""
     key_file = key_file_for(options)
     existed = os.path.exists(key_file)
-    write_key_file(key_file, key, secret, options)
+    write_key_file(key_file, key, secret)
     try:
         edit_named(options, lambda t: bind.edit_allow_transfer(bind.add_include(t, key_file), add=[bind.key_entry(key["name"])]))
     except SystemExit:
@@ -195,11 +218,23 @@ def add_key_to_bind(key, secret, options):
 
 
 def drop_ips_from_bind(ips, options):
+    """Remove our IPs from allow-transfer; returns the entries actually removed, as written."""
+    with open(options) as fh:
+        before = bind.allow_transfer_entries(fh.read())
+    removed = [x for x in before if x.strip('"') in set(ips)]
     edit_named(options, lambda t: bind.edit_allow_transfer(t, drop=ips))
+    return removed
 
 
-def ip_back_to_bind(ip, options):
-    edit_named(options, lambda t: bind.edit_allow_transfer(t, add=[ip] if ip else []))
+def ips_back_to_bind(entries, options):
+    edit_named(options, lambda t: bind.edit_allow_transfer(t, add=list(entries)))
+
+
+def add_section_value(config, name, value):
+    cp = configparser.ConfigParser()
+    cp.read(config)
+    body = "".join(f"{k} = {v}\n" for k, v in cp["tsig"].items() if k != name)
+    write_section(config, body + f"{name} = {value}\n")
 
 
 def remove_key_from_bind(key_name, options):
@@ -334,7 +369,9 @@ def main():
                 print(f"    In WHM > Service Configuration > DNS Server (BIND) > Additional zone configuration,")
                 print(f"    replace our IP with:  allow-transfer {{ key \"{key['name']}\"; }};")
             if set_zone_keys(cfg, this_servers_zones(cfg), key["id"], a.zones, "Set the key"):
-                drop_ips_from_bind(our_ips(cfg), options)
+                removed = drop_ips_from_bind(our_ips(cfg), options)
+                if removed:
+                    add_section_value(a.config, "removed_entries", ",".join(removed))
                 print("[+] allow-transfer: our IPs removed, transfers to SecondDNS need the key")
             else:
                 print("[!] our IPs stay in allow-transfer until every zone has the key: seconddns-tsig enable --tsig=... --zones")
@@ -343,10 +380,11 @@ def main():
                 print("TSIG: already off")
                 return
             t = cp["tsig"]
-            ips = our_ips(cfg)
             saved = dict(t)
-            # mirror of enable: our IP back, new zones unsigned, zones off the key, key goes
-            ip_back_to_bind(ips[0] if ips else "", options)
+            # what enable took out; an install that never dropped anything gets the first IP
+            back = [x for x in saved.get("removed_entries", "").split(",") if x] or our_ips(cfg)[:1]
+            # mirror of enable: our IPs back, new zones unsigned, zones off the key, key goes
+            ips_back_to_bind(back, options)
             write_section(a.config, "")
             restart_worker()
             mine = [z for z in this_servers_zones(cfg) if z.get("tsigKeyId") == saved["key_id"]]

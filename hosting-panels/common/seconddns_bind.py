@@ -150,3 +150,17 @@ def zone_level_transfers(text, ips):
         if any(ip in [x.strip().strip('"') for x in body.split(";")] for ip in ips):
             found += 1
     return found
+
+
+def allow_transfer_entries(text):
+    """Entries of the options-level allow-transfer, as written (quotes kept), or []."""
+    mask = _code_mask(text)
+    span = _options_span(text, mask)
+    if not span:
+        return []
+    s, e = span
+    m = re.search(r"\ballow-transfer\s*\{([^{}]*)\}\s*;", mask[s:e])
+    if not m:
+        return []
+    values = _code_mask(text, keep_strings=True)[s + m.start(1):s + m.end(1)]
+    return [x.strip() for x in values.split(";") if x.strip()]

@@ -21,7 +21,8 @@ export SECONDDNS_CONF="$TMP/seconddns.conf"
 export SECONDDNS_TSIG_SECRET="$TMP/etc-seconddns/tsig.secret"
 export SECONDDNS_NAMED_OPTIONS="$TMP/named/named.conf"
 export SECONDDNS_NAMED_CHECKCONF="sh -c 'test ! -e $TMP/checkconf-fails'"
-export SECONDDNS_NAMED_RELOAD="true"
+export SECONDDNS_NAMED_RELOAD="sh -c 'test ! -e $TMP/reload-fails'"
+export SECONDDNS_NAMED_GID="$(id -g)"
 export SECONDDNS_QUEUED_RESTART="sh -c 'echo restart >> $TMP/restarts.log'"
 KEYFILE="$TMP/named/seconddns-tsig.key"
 
@@ -36,7 +37,7 @@ reset() {
     cp "$FIXTURE" "$SECONDDNS_NAMED_OPTIONS"
     # what the installer leaves: our IP next to the customer's own secondary
     sed 's/allow-transfer    { "none"; };/allow-transfer    { 198.51.100.7; 203.0.113.9; };/' "$FIXTURE" > "$SECONDDNS_NAMED_OPTIONS"
-    rm -f "$KEYFILE" "$TMP/checkconf-fails" "$TMP/patch-fails" "$SECONDDNS_TSIG_SECRET"
+    rm -f "$KEYFILE" "$TMP/checkconf-fails" "$TMP/reload-fails" "$TMP/patch-fails" "$SECONDDNS_TSIG_SECRET"
     : > "$TMP/patches.log"; : > "$TMP/restarts.log"
     cat > "$SECONDDNS_CONF" <<EOF
 [seconddns]
@@ -200,6 +201,35 @@ grep -q '^\[tsig\]' "$SECONDDNS_CONF" && fail "[tsig] written without a choice" 
 "$TSIG" setup --tsig="web:$SECRET" > /dev/null 2>&1
 assert_eq "$(at)" 'allow-transfer    { 198.51.100.7; key "acct-web"; };' "setup --tsig enables and sets the zones"
 SECONDDNS_NAMED_OPTIONS="$TMP/absent.conf" "$TSIG" setup --tsig="web:$SECRET" > /dev/null 2>&1 && fail "--tsig accepted without BIND" || ok "--tsig without BIND is refused"
+
+echo "== 13. disable gives back exactly what enable removed (IPv6-first host)"
+reset
+sed 's/allow-transfer    { "none"; };/allow-transfer    { 198.51.100.7; 2001:db8::9; };/' "$FIXTURE" > "$SECONDDNS_NAMED_OPTIONS"
+"$TSIG" enable --tsig="web:$SECRET" --zones > /dev/null 2>&1
+assert_eq "$(at)" 'allow-transfer    { 198.51.100.7; key "acct-web"; };' "IPv6 entry removed"
+grep -q '^removed_entries = 2001:db8::9$' "$SECONDDNS_CONF" && ok "removed entry remembered" || fail "removed entry not recorded: $(grep removed "$SECONDDNS_CONF")"
+"$TSIG" disable --zones > /dev/null 2>&1
+assert_eq "$(at)" 'allow-transfer    { 198.51.100.7; 2001:db8::9; };' "disable puts the IPv6 entry back, not the first IPv4"
+
+echo "== 14. a failed reload restores the config and stops"
+reset
+cp "$SECONDDNS_NAMED_OPTIONS" "$TMP/before"
+touch "$TMP/reload-fails"
+"$TSIG" enable --tsig="web:$SECRET" --zones > "$TMP/out" 2>&1 && fail "enable succeeded although named did not reload" || ok "enable fails on a failed reload"
+cmp -s "$TMP/before" "$SECONDDNS_NAMED_OPTIONS" && ok "named.conf restored" || fail "named.conf left edited"
+grep -q "did not reload" "$TMP/out" && ok "says named did not reload" || fail "no reload message: $(cat "$TMP/out")"
+assert_eq "$(wc -l < "$TMP/patches.log" | tr -d ' ')" 0 "no zone patched"
+grep -q '^\[tsig\]' "$SECONDDNS_CONF" && fail "[tsig] stored after a failed reload" || ok "nothing stored"
+
+echo "== 15. key file group comes from named; unknown group refuses"
+reset
+"$TSIG" enable --tsig="web:$SECRET" --no-zones > /dev/null 2>&1
+assert_eq "$(stat -c %g "$KEYFILE" 2>/dev/null || stat -f %g "$KEYFILE")" "$(id -g)" "key file group is named's group"
+"$TSIG" disable --zones > /dev/null 2>&1
+reset
+env -u SECONDDNS_NAMED_GID SECONDDNS_NAMED_PROC=no-such-named-process "$TSIG" enable --tsig="web:$SECRET" --zones > "$TMP/out" 2>&1 && fail "enable without a known named group succeeded" || ok "enable refuses without named's group"
+grep -q "cannot determine the group named runs as" "$TMP/out" && ok "says why" || fail "message: $(cat "$TMP/out")"
+[ -e "$KEYFILE" ] && fail "key file written" || ok "no key file"
 
 echo
 echo "passed: $PASS, failed: $FAIL"

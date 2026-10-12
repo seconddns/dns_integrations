@@ -27,6 +27,8 @@ export SECONDDNS_NAMED_OPTIONS="$CONF"
 export SECONDDNS_NAMED_CHECKCONF="named-checkconf $CONF"
 export SECONDDNS_NAMED_RELOAD="sh -c 'kill -HUP \$(cat $TMP/named.pid) && sleep 1'"
 export SECONDDNS_QUEUED_RESTART="true"
+# the runner may also run the distribution's named as bind; ours runs as us
+export SECONDDNS_NAMED_GID="$(id -g)"
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); echo "  ok: $1"; }
