@@ -68,19 +68,23 @@ The installer:
 
 ## AXFR Configuration
 
-The installer configures `allow-transfer` and `also-notify` in `named.conf.options` directly. However, Plesk may overwrite these settings during config regeneration.
+Plesk writes `allow-transfer { common-allow-transfer; };` into every zone, so `allow-transfer` in the BIND `options` block (or in **Server-wide Settings → Additional DNS settings**, which lands there) does not open transfers for Plesk zones. The ACL `common-allow-transfer` is what counts. Plesk builds it from **Tools & Settings → DNS Settings → Transfer Restrictions Template** and keeps it across config regeneration.
 
-To make AXFR settings permanent, also add them via Plesk UI:
+The installer adds the SecondDNS addresses to that template, after asking:
 
-1. Go to **Tools & Settings** → **DNS Settings** → **Server-wide Settings**
-2. In the **Additional DNS settings** field, add:
+```bash
+plesk bin server_dns -u -add-acl SECONDARY_IP[,SECONDARY_IPV6]
+```
+
+It skips addresses already listed and checks that they appear in `acl common-allow-transfer` in `named.conf`. On Plesk 18.0.81 the call rewrites `named.conf` and reloads named immediately. If an address does not show up, the installer says so; add it in **Transfer Restrictions Template** by hand.
+
+NOTIFY is not set per zone, so the server-wide settings do reach it. For instant updates, add this to **Server-wide Settings → Additional DNS settings**:
 
 ```
-allow-transfer { SECONDARY_IP; };
 also-notify { SECONDARY_IP; };
 ```
 
-Replace `SECONDARY_IP` with the IP shown by the installer. Click **Apply**.
+The uninstaller does not remove the addresses from the Transfer Restrictions Template (`server_dns` has no command for it): remove them there by hand.
 
 ## DNS Template
 

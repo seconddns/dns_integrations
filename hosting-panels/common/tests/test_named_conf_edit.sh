@@ -19,7 +19,7 @@ block() { # $1 file, $2 block name -> prints the block
 }
 
 checked=0
-for panel in cpanel plesk directadmin; do
+for panel in cpanel directadmin; do
     src="$HERE/../../$panel/install.sh"
     [ -f "$src" ] || { echo "missing $src"; exit 1; }
     grep -q "configure_named_axfr" "$src" || { echo "$panel: no configure_named_axfr"; exit 1; }
@@ -63,14 +63,20 @@ for panel in cpanel plesk directadmin; do
 done
 
 echo "== cheap greps: every installer verifies before reporting"
-for panel in cpanel plesk directadmin; do
+for panel in cpanel directadmin; do
     src="$HERE/../../$panel/install.sh"
     grep -qE 'if named-checkconf' "$src" && ok "$panel gates the reload on named-checkconf" || fail "$panel reloads without verifying"
     grep -q "did not validate" "$src" && ok "$panel reports a broken config" || fail "$panel would claim success"
     grep -qE 'cp "\$NAMED_BAK"' "$src" && ok "$panel restores the backup" || fail "$panel has no rollback"
 done
 
-[ "$checked" -ge 3 ] && ok "checked $checked installers" || fail "only $checked matched"
+[ "$checked" -ge 2 ] && ok "checked $checked installers" || fail "only $checked matched"
+
+echo "== plesk: zones carry allow-transfer { common-allow-transfer; }, so options must not be edited"
+src="$HERE/../../plesk/install.sh"
+grep -q "configure_named_axfr" "$src" && fail "plesk still edits the options block" || ok "plesk no longer edits options"
+grep -q "allow-transfer { \$" "$src" && fail "plesk still tells the customer to put allow-transfer in server-wide settings" || ok "no allow-transfer advice for server-wide settings"
+grep -q "server_dns -u -add-acl" "$src" && ok "plesk uses the transfer ACL" || fail "plesk does not use server_dns -add-acl"
 
 echo
 echo "passed=$PASS failed=$FAIL"

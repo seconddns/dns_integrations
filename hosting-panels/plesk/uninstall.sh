@@ -105,6 +105,12 @@ for f in /etc/bind/named.conf.options /etc/named.conf.options; do
     break
 done
 
+# the installer added our IPs to Plesk's transfer ACL; server_dns has no command to take
+# them out, and editing Plesk's database directly is not ours to do
+echo ""
+echo "[!] SecondDNS IPs stay in Plesk's zone-transfer ACL. Remove them in:"
+echo "    Tools & Settings > DNS Settings > Transfer Restrictions Template"
+
 # Remove config
 if [ -f "$CONFIG_FILE" ]; then
     rm -f "$CONFIG_FILE"

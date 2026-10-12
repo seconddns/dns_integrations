@@ -74,41 +74,35 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
-# Add the secondary to allow-transfer and also-notify inside the options block.
-# Bounded to options: a config with views has a closing brace per block, and an
-# unbounded insert lands in logging.
-configure_named_axfr() {
-    local conf="$1" ip="$2" tmp
-    tmp="$(mktemp)"
-
-    _rewrite() { cat > "$tmp" && cat "$tmp" > "$conf"; }
-
-    # cPanel writes the ACL quoted, other panels bare
-    sed -e '/allow-transfer/s/"none";//g' -e '/allow-transfer/s/[[:space:]]none;//g' \
-        -e '/also-notify/s/"none";//g'    -e '/also-notify/s/[[:space:]]none;//g' "$conf" | _rewrite
-
-    if grep -q "allow-transfer" "$conf"; then
-        grep -q "allow-transfer.*$ip" "$conf" || \
-            sed "s|allow-transfer[[:space:]]*{|allow-transfer { $ip; |" "$conf" | _rewrite
-    else
-        awk -v ip="$ip" '
-            /^options[[:space:]]*{/ { inopt = 1 }
-            inopt && /^};/ { print "    allow-transfer { " ip "; };"; inopt = 0 }
-            { print }' "$conf" | _rewrite
+# Plesk writes allow-transfer { common-allow-transfer; } into every zone, so an IP in
+# the options block opens nothing. The ACL comes from Tools & Settings > DNS Settings >
+# Transfer Restrictions Template (misc.DNS_Allow_Transfer*), which server_dns -add-acl
+# fills and Plesk keeps across config regeneration. On Plesk 18.0.81 the call rewrites
+# named.conf and reloads named at once; the result is still checked, not assumed.
+configure_plesk_acl() {   # $1 = comma-separated IPs
+    local plesk_bin="${SECONDDNS_PLESK:-plesk}"
+    local conf="${SECONDDNS_PLESK_NAMED_CONF:-$(readlink -f /etc/named.conf 2>/dev/null || echo /etc/named.conf)}"
+    local have missing="" ip
+    have=$("$plesk_bin" db -Ne "select val from misc where param like 'DNS_Allow_Transfer%'" 2>/dev/null)
+    for ip in ${1//,/ }; do
+        printf '%s\n' "$have" | grep -qxF "$ip" || missing="${missing:+$missing,}$ip"
+    done
+    if [ -z "$missing" ]; then
+        echo "[+] Transfer Restrictions Template already allows $1"
+        return 0
     fi
-
-    if grep -q "also-notify" "$conf"; then
-        grep -q "also-notify.*$ip" "$conf" || \
-            sed "s|also-notify[[:space:]]*{|also-notify { $ip; |" "$conf" | _rewrite
-    else
-        awk -v ip="$ip" '
-            /^options[[:space:]]*{/ { inopt = 1 }
-            inopt && /^};/ { print "    also-notify { " ip "; };"; inopt = 0 }
-            { print }' "$conf" | _rewrite
+    if ! "$plesk_bin" bin server_dns -u -add-acl "$missing" >/dev/null 2>&1; then
+        echo "[!] plesk bin server_dns -add-acl $missing failed"
+        return 1
     fi
-
-    rm -f "$tmp"
-    unset -f _rewrite
+    for ip in ${missing//,/ }; do
+        if ! awk '/^acl common-allow-transfer/,/^};/' "$conf" | grep -qF "$ip;"; then
+            echo "[!] $ip is not in acl common-allow-transfer of $conf"
+            echo "    Add it in Tools & Settings > DNS Settings > Transfer Restrictions Template"
+            return 1
+        fi
+    done
+    echo "[+] Transfer Restrictions Template: added $missing (acl common-allow-transfer)"
 }
 
 echo "=== SecondDNS Plesk Integration ==="
@@ -408,60 +402,23 @@ echo "--- AXFR configuration ---"
 if [ -z "$DNS_IPS" ]; then
     echo "[!] No secondary DNS IP — configure AXFR manually"
 else
-    SECONDARY_IP="${DNS_IPS%%,*}"
-    echo "[+] Secondary DNS IP: $SECONDARY_IP"
+    echo "[+] Secondary DNS IPs: $DNS_IPS"
 
-    # Find BIND config
-    NAMED_OPTIONS=""
-    for f in /etc/bind/named.conf.options /etc/named.conf.options /etc/named.conf; do
-        [ -f "$f" ] && NAMED_OPTIONS="$f" && break
-    done
-
-    if [ -n "$NAMED_OPTIONS" ]; then
-        echo "[=] Detected BIND config: $NAMED_OPTIONS"
-
-        NEEDS_FIX=0
-        if ! grep -q "allow-transfer.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-            NEEDS_FIX=1
+    if command -v plesk >/dev/null 2>&1; then
+        if confirm "Allow zone transfers to $DNS_IPS in Plesk's Transfer Restrictions Template?"; then
+            configure_plesk_acl "$DNS_IPS" || true
         fi
-        if ! grep -q "also-notify.*$SECONDARY_IP" "$NAMED_OPTIONS" 2>/dev/null; then
-            NEEDS_FIX=1
-        fi
-
-        if [ "$NEEDS_FIX" -eq 1 ]; then
-            if confirm "Add allow-transfer and also-notify to $NAMED_OPTIONS?"; then
-                NAMED_BAK="${NAMED_OPTIONS}.bak.$(date +%s)"
-                cp "$NAMED_OPTIONS" "$NAMED_BAK"
-
-                # allow-transfer
-                configure_named_axfr "$NAMED_OPTIONS" "$SECONDARY_IP"
-
-
-                if named-checkconf >/dev/null 2>&1; then
-                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
-                    echo "[+] BIND configured and reloaded"
-                else
-                    # a config named cannot parse is worse than no change
-                    cp "$NAMED_BAK" "$NAMED_OPTIONS"
-                    rndc reload >/dev/null 2>&1 || systemctl reload named >/dev/null 2>&1 || true
-                    echo "[!] named.conf did not validate — restored from the backup"
-                    echo "[!] Check: named-checkconf"
-                fi
-            fi
-        else
-            echo "[+] BIND AXFR config already includes $SECONDARY_IP"
-        fi
+    else
+        echo "[!] plesk CLI not found — add $DNS_IPS in Tools & Settings > DNS Settings > Transfer Restrictions Template"
     fi
 
+    # also-notify is not set per zone by Plesk, so the server-wide settings do reach it
     echo ""
-    echo -e "\033[1;33m[!] IMPORTANT: Plesk may overwrite direct config changes.\033[0m"
-    echo -e "\033[1;33m    To make AXFR settings permanent, also add them in:\033[0m"
-    echo ""
+    echo -e "\033[1;33m[!] For instant updates, add NOTIFY to the server-wide settings:\033[0m"
     echo -e "    \033[1mTools & Settings > DNS Settings > Server-wide Settings\033[0m"
     echo -e "    \033[1m> Additional DNS settings:\033[0m"
     echo ""
-    echo -e "      \033[1;32mallow-transfer { $SECONDARY_IP; };\033[0m"
-    echo -e "      \033[1;32malso-notify { $SECONDARY_IP; };\033[0m"
+    echo -e "      \033[1;32malso-notify { ${DNS_IPS//,/; }; };\033[0m"
     echo ""
     echo -e "    \033[1;33mThen click Apply.\033[0m"
 fi
@@ -493,11 +450,10 @@ echo "  automatically synced to your secondary DNS."
 echo ""
 echo "  Verify handlers:  plesk bin event_handler --list"
 if [ -n "$DNS_IPS" ]; then
-    SECONDARY_IP="${DNS_IPS%%,*}"
     echo ""
-    echo -e "\033[1;33m[!] Don't forget to configure AXFR in Plesk UI:\033[0m"
-    echo -e "    \033[1mTools & Settings > DNS Settings > Server-wide Settings\033[0m"
-    echo -e "    Add to 'Additional DNS settings':"
-    echo -e "      \033[1;32mallow-transfer { $SECONDARY_IP; };\033[0m"
-    echo -e "      \033[1;32malso-notify { $SECONDARY_IP; };\033[0m"
+    echo -e "\033[1;33m[!] AXFR in Plesk:\033[0m"
+    echo -e "    Transfers: Tools & Settings > DNS Settings > Transfer Restrictions Template"
+    echo -e "      must list ${DNS_IPS//,/, } (the installer adds them when allowed)"
+    echo -e "    NOTIFY: Server-wide Settings > Additional DNS settings:"
+    echo -e "      \033[1;32malso-notify { ${DNS_IPS//,/; }; };\033[0m"
 fi
