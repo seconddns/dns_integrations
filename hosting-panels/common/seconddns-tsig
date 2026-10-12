@@ -14,6 +14,18 @@
   seconddns-tsig secret                            print the stored secret (root)
   seconddns-tsig clear                             remove the [tsig] section and the secret file
 
+  seconddns-tsig enable --tsig=[ALGORITHM:]KEY:SECRET [--zones|--no-zones]
+        resolve and store the key, install it on this server's BIND (key file, include,
+        allow-transfer by key instead of our IPs), then set it on this server's zones in
+        SecondDNS (asks unless --zones / --no-zones)
+  seconddns-tsig disable [--zones|--no-zones]      undo enable: our IP back in allow-transfer,
+                                                  key removed, zones back to unsigned
+  seconddns-tsig restore                           put the key back on BIND if the panel rewrote
+                                                  its configuration (quiet when nothing is missing)
+  seconddns-tsig setup [--tsig=…]                  installer step: with --tsig, enable; on a terminal,
+                                                  ask whether transfers go by our IP or by a TSIG key;
+                                                  otherwise keep our IP
+
 The config is world-readable (panel hooks read it as non-root users), so the secret lives in
 /etc/seconddns/tsig.secret (0600) and the config only names that file. It is kept so the key
 can be put back on the panel's DNS server when the panel rewrites its configuration.
@@ -23,10 +35,14 @@ import argparse
 import configparser
 import os
 import re
+import shlex
+import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from seconddns_common import load_config, resolve_tsig_key, check_tsig_secret, parse_tsig_pair  # noqa: E402
+from seconddns_common import api, load_config, resolve_tsig_key, check_tsig_secret, parse_tsig_pair  # noqa: E402
+import seconddns_bind as bind  # noqa: E402
 
 
 def write_section(path, body):
@@ -60,6 +76,232 @@ def stored_secret_file(path):
     return cp.get("tsig", "secret_file", fallback="").strip()
 
 
+def resolve_pair(config, pair):
+    """Key for a --tsig pair, checked against the account. Exits on any mismatch."""
+    algorithm, ref, secret, err = parse_tsig_pair(pair)
+    if err:
+        sys.exit(err)
+    key, err = resolve_tsig_key(load_config(config), ref)
+    if err:
+        sys.exit(err)
+    if algorithm and algorithm != key["algorithm"]:
+        sys.exit(f"{key['name']} is {key['algorithm']}, not {algorithm}")
+    why = check_tsig_secret(key["algorithm"], secret)
+    if why:
+        sys.exit(f"{key['name']}: {why}")
+    return key, secret
+
+
+def store(config, key, secret):
+    write_secret(secret)
+    write_section(config, f"key_id = {key['id']}\nkey_name = {key['name']}\nalgorithm = {key['algorithm']}\nsecret_file = {SECRET_FILE}\n")
+
+
+# --- BIND ------------------------------------------------------------------------------
+
+NAMED_OPTIONS_CANDIDATES = ["/etc/bind/named.conf.options", "/etc/named.conf.options", "/etc/named.conf", "/etc/bind/named.conf"]
+
+
+def named_options():
+    """The BIND options file, only when named is the DNS server actually running: a
+    named.conf left behind on a PowerDNS server must not be edited."""
+    forced = os.environ.get("SECONDDNS_NAMED_OPTIONS")
+    if forced:
+        return forced if os.path.isfile(forced) else None
+    if subprocess.run(["pgrep", "-x", "named"], capture_output=True).returncode != 0:
+        return None
+    return next((f for f in NAMED_OPTIONS_CANDIDATES if os.path.isfile(f)), None)
+
+
+def our_ips(cfg):
+    code, info = api(cfg, "GET", "/api/server-info", ua="SecondDNS-Tsig/1.0")
+    if code != 200 or not isinstance(info, dict):
+        sys.exit(f"GET /api/server-info failed: HTTP {code}")
+    return [x.strip() for x in str(info.get("dnsIps", "")).split(",") if x.strip()]
+
+
+def checkconf_ok():
+    cmd = shlex.split(os.environ.get("SECONDDNS_NAMED_CHECKCONF", "named-checkconf"))
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def reload_named():
+    forced = os.environ.get("SECONDDNS_NAMED_RELOAD")
+    cmds = [shlex.split(forced)] if forced else [["rndc", "reload"], ["systemctl", "reload", "named"], ["systemctl", "reload", "bind9"]]
+    for cmd in cmds:
+        try:
+            if subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def named_gid():
+    """Group named runs as, read from the process: the options file may be root:root
+    while named runs as named or bind."""
+    forced = os.environ.get("SECONDDNS_NAMED_GID")
+    if forced:
+        return int(forced)
+    r = subprocess.run(["pgrep", "-x", os.environ.get("SECONDDNS_NAMED_PROC", "named")], capture_output=True, text=True)
+    for pid in r.stdout.split():
+        try:
+            with open(f"/proc/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("Gid:"):
+                        return int(line.split()[1])
+        except OSError:
+            continue
+    sys.exit("cannot determine the group named runs as; key file not written")
+
+
+def write_key_file(path, key, secret):
+    """Key file readable by named only: mode 0640, root and named's group."""
+    gid = named_gid()
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+    with os.fdopen(fd, "w") as f:
+        f.write(bind.key_block(key["name"], key["algorithm"], secret))
+    try:
+        os.chown(tmp, 0, gid)
+    except PermissionError:
+        os.chown(tmp, -1, gid)  # unprivileged runs (tests): at least the group
+    os.chmod(tmp, 0o640)
+    os.replace(tmp, path)
+
+
+def edit_named(options, change):
+    """Apply change(text) -> (text, error) to the options file; keep it only when
+    named-checkconf accepts the result, then reload."""
+    with open(options) as f:
+        before = f.read()
+    after, err = change(before)
+    if err:
+        sys.exit(f"{options}: {err}")
+    if after == before:
+        return False
+    backup = options + ".seconddns-tsig.bak"
+    shutil.copy2(options, backup)
+    with open(options, "w") as f:
+        f.write(after)
+    if not checkconf_ok():
+        shutil.copy2(backup, options)
+        sys.exit(f"{options}: named-checkconf rejected the change; restored from {backup}")
+    # named-checkconf does not read key files the way named does: a reload that fails
+    # here would leave a config the next named restart cannot load
+    if not reload_named():
+        shutil.copy2(backup, options)
+        reload_named()
+        sys.exit(f"{options}: named did not reload the change; restored from {backup}")
+    return True
+
+
+def key_file_for(options):
+    return os.path.join(os.path.dirname(options), bind.KEY_FILE_NAME)
+
+
+def add_key_to_bind(key, secret, options):
+    """Key file, include, and the key added to allow-transfer next to whatever is there."""
+    key_file = key_file_for(options)
+    existed = os.path.exists(key_file)
+    write_key_file(key_file, key, secret)
+    try:
+        edit_named(options, lambda t: bind.edit_allow_transfer(bind.add_include(t, key_file), add=[bind.key_entry(key["name"])]))
+    except SystemExit:
+        if not existed:
+            os.remove(key_file)
+        raise
+    return key_file
+
+
+def drop_ips_from_bind(ips, options):
+    """Remove our IPs from allow-transfer; returns the entries actually removed, as written."""
+    with open(options) as fh:
+        before = bind.allow_transfer_entries(fh.read())
+    removed = [x for x in before if x.strip('"') in set(ips)]
+    edit_named(options, lambda t: bind.edit_allow_transfer(t, drop=ips))
+    return removed
+
+
+def ips_back_to_bind(entries, options):
+    edit_named(options, lambda t: bind.edit_allow_transfer(t, add=list(entries)))
+
+
+def add_section_value(config, name, value):
+    cp = configparser.ConfigParser()
+    cp.read(config)
+    body = "".join(f"{k} = {v}\n" for k, v in cp["tsig"].items() if k != name)
+    write_section(config, body + f"{name} = {value}\n")
+
+
+def remove_key_from_bind(key_name, options):
+    key_file = key_file_for(options)
+    edit_named(options, lambda t: bind.edit_allow_transfer(bind.remove_include(t, key_file), drop=[bind.key_entry(key_name)]))
+    if os.path.exists(key_file):
+        os.remove(key_file)
+
+
+def restart_worker():
+    """seconddns-queued reads the config once; restart it so new zones follow [tsig]."""
+    forced = os.environ.get("SECONDDNS_QUEUED_RESTART")
+    cmd = shlex.split(forced) if forced else ["systemctl", "try-restart", "seconddns-queued"]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        print("[!] restart the queue worker: systemctl restart seconddns-queued", file=sys.stderr)
+
+
+def tty_input(prompt, secret=False):
+    import getpass
+    try:
+        with open("/dev/tty", "r+") as tty:
+            if secret:
+                return getpass.getpass(prompt, stream=tty)
+            tty.write(prompt)
+            tty.flush()
+            return tty.readline().strip()
+    except OSError:
+        return None
+
+
+# --- zones in SecondDNS -----------------------------------------------------------------
+
+def this_servers_zones(cfg):
+    code, zones = api(cfg, "GET", "/api/zones", ua="SecondDNS-Tsig/1.0")
+    if code != 200 or not isinstance(zones, list):
+        sys.exit(f"GET /api/zones failed: HTTP {code}")
+    return [z for z in zones if z.get("masterIp") == cfg["master_ip"]]
+
+
+def ask(question, answer):
+    if answer is not None:
+        return answer
+    if not sys.stdin.isatty():
+        return False
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
+def set_zone_keys(cfg, zones, key_id, answer, what):
+    """True when every zone ends up with key_id."""
+    todo = [z for z in zones if z.get("tsigKeyId") != key_id]
+    if not todo:
+        return True
+    if not ask(f"{what} on {len(todo)} zone(s) of this server in SecondDNS?", answer):
+        print(f"[=] {len(todo)} zone(s) left as they are")
+        return False
+    failed = 0
+    for z in todo:
+        code, _ = api(cfg, "PATCH", f"/api/zones/{z['id']}", {"tsigKeyId": key_id}, ua="SecondDNS-Tsig/1.0")
+        if code != 200:
+            failed += 1
+            print(f"[!] {z['name']}: HTTP {code}", file=sys.stderr)
+    print(f"[+] {what}: {len(todo) - failed} of {len(todo)} zone(s)")
+    return failed == 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=os.environ.get("SECONDDNS_CONF", "/etc/seconddns.conf"))
@@ -73,7 +315,102 @@ def main():
     sub.add_parser("secret")
     sub.add_parser("status")
     sub.add_parser("clear")
+    for name in ("enable", "disable"):
+        x = sub.add_parser(name)
+        if name == "enable":
+            x.add_argument("--tsig", metavar="[ALGORITHM:]KEY:SECRET", required=True)
+        g = x.add_mutually_exclusive_group()
+        g.add_argument("--zones", dest="zones", action="store_true", default=None)
+        g.add_argument("--no-zones", dest="zones", action="store_false")
+    sub.add_parser("restore")
+    su = sub.add_parser("setup")
+    su.add_argument("--tsig", metavar="[ALGORITHM:]KEY:SECRET")
     a = ap.parse_args()
+
+    if a.cmd == "setup":
+        if not named_options():
+            if a.tsig:
+                sys.exit("--tsig: BIND (named) is not running here; TSIG for PowerDNS panels is not supported yet")
+            return
+        pair = a.tsig
+        if not pair and os.environ.get("SECONDDNS_AUTO_YES") != "1":
+            choice = tty_input("How should SecondDNS fetch your zones?\n"
+                               "  1) by our IP address in allow-transfer   [default]\n"
+                               "  2) with a TSIG key (create one in Settings › DNS first)\n"
+                               "Choice [1]: ")
+            if choice == "2":
+                pair = tty_input("TSIG key as [ALGORITHM:]KEY:SECRET (KEY = label or full name from Settings › DNS): ", secret=True)
+                if not pair:
+                    sys.exit("no key given; transfers stay by IP. Later: seconddns-tsig enable --tsig=[ALGORITHM:]KEY:SECRET")
+        if not pair:
+            print("[=] zone transfers: by our IP address")
+            return
+        a.cmd, a.tsig, a.zones = "enable", pair, True
+
+    if a.cmd in ("enable", "disable", "restore"):
+        options = named_options()
+        if not options:
+            sys.exit("BIND (named) is not running here; TSIG for PowerDNS panels is not supported yet")
+        cfg = load_config(a.config)
+        cp = configparser.ConfigParser()
+        cp.read(a.config)
+        if a.cmd == "enable":
+            # 1. key accepted next to our IPs, 2. zones switch to the key, 3. only then our
+            # IPs go: an unsigned request from a zone not yet switched is never refused
+            key, secret = resolve_pair(a.config, a.tsig)
+            key_file = add_key_to_bind(key, secret, options)
+            store(a.config, key, secret)
+            restart_worker()
+            print(f"[+] TSIG key {key['name']} installed: {key_file}, accepted in allow-transfer of {options}")
+            with open(options) as fh:
+                zl = bind.zone_level_transfers(fh.read(), our_ips(cfg))
+            if zl:
+                print(f"[!] {zl} zone-level allow-transfer entr{'y' if zl == 1 else 'ies'} name our IP and override options.")
+                print(f"    In WHM > Service Configuration > DNS Server (BIND) > Additional zone configuration,")
+                print(f"    replace our IP with:  allow-transfer {{ key \"{key['name']}\"; }};")
+            if set_zone_keys(cfg, this_servers_zones(cfg), key["id"], a.zones, "Set the key"):
+                removed = drop_ips_from_bind(our_ips(cfg), options)
+                if removed:
+                    add_section_value(a.config, "removed_entries", ",".join(removed))
+                print("[+] allow-transfer: our IPs removed, transfers to SecondDNS need the key")
+            else:
+                print("[!] our IPs stay in allow-transfer until every zone has the key: seconddns-tsig enable --tsig=... --zones")
+        elif a.cmd == "disable":
+            if not cp.has_section("tsig"):
+                print("TSIG: already off")
+                return
+            t = cp["tsig"]
+            saved = dict(t)
+            # what enable took out; an install that never dropped anything gets the first IP
+            back = [x for x in saved.get("removed_entries", "").split(",") if x] or our_ips(cfg)[:1]
+            # mirror of enable: our IPs back, new zones unsigned, zones off the key, key goes
+            ips_back_to_bind(back, options)
+            write_section(a.config, "")
+            restart_worker()
+            mine = [z for z in this_servers_zones(cfg) if z.get("tsigKeyId") == saved["key_id"]]
+            if not set_zone_keys(cfg, mine, None, a.zones, "Remove the key"):
+                write_section(a.config, "".join(f"{k} = {v}\n" for k, v in saved.items()))
+                restart_worker()
+                sys.exit("[!] the key stays on BIND while zones still use it: seconddns-tsig disable --zones")
+            remove_key_from_bind(saved["key_name"], options)
+            f = saved.get("secret_file", "")
+            if f and os.path.exists(f):
+                os.remove(f)
+            print(f"[+] TSIG off: our IP is back in allow-transfer in {options}, key removed")
+        else:
+            if not cp.has_section("tsig"):
+                return
+            t = cp["tsig"]
+            key_file = key_file_for(options)
+            with open(options) as fh:
+                text = fh.read()
+            if os.path.exists(key_file) and bind.include_line(key_file).strip() in text and bind.has_key_in_allow_transfer(text, t["key_name"]):
+                return
+            with open(t["secret_file"]) as fh:
+                secret = fh.read().strip()
+            add_key_to_bind({"id": t["key_id"], "name": t["key_name"], "algorithm": t["algorithm"]}, secret, options)
+            print(f"[+] TSIG key {t['key_name']} restored in {options}")
+        return
 
     if a.cmd == "check-secret":
         why = check_tsig_secret(a.algorithm, a.secret)
@@ -113,20 +450,9 @@ def main():
             os.remove(f)
         return
 
-    algorithm, ref, secret, err = parse_tsig_pair(a.tsig)
-    if err:
-        sys.exit(err)
-    key, err = resolve_tsig_key(load_config(a.config), ref)
-    if err:
-        sys.exit(err)
-    if algorithm and algorithm != key["algorithm"]:
-        sys.exit(f"{key['name']} is {key['algorithm']}, not {algorithm}")
-    why = check_tsig_secret(key["algorithm"], secret)
-    if why:
-        sys.exit(f"{key['name']}: {why}")
+    key, secret = resolve_pair(a.config, a.tsig)
     if a.write:
-        write_secret(secret)
-        write_section(a.config, f"key_id = {key['id']}\nkey_name = {key['name']}\nalgorithm = {key['algorithm']}\nsecret_file = {SECRET_FILE}\n")
+        store(a.config, key, secret)
     print(key["id"], key["name"], key["algorithm"])
 
 

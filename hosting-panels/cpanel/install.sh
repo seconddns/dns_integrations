@@ -27,6 +27,7 @@ for arg in "$@"; do
         --api-url=*) API_URL="${arg#*=}" ;;
         --master-ip=*) MASTER_IP="${arg#*=}" ;;
         --yes|-y) AUTO_YES=1 ;;
+        --tsig=*) TSIG="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 --api-key=KEY [--api-url=URL] [--master-ip=IP] [--yes]"
             echo ""
@@ -34,6 +35,7 @@ for arg in "$@"; do
             echo "  --api-url=URL     API base URL (default: https://seconddns.com)"
             echo "  --master-ip=IP    Primary DNS server IP (default: auto-detect)"
             echo "  --yes             Skip confirmation prompts"
+            echo "  --tsig=[ALG:]KEY:SECRET  Zone transfers by TSIG key instead of our IP"
             exit 0
             ;;
     esac
@@ -273,6 +275,7 @@ curl -sf --max-time 10 -o /usr/local/bin/seconddns-queued "$COMMON_URL/seconddns
 curl -sf --max-time 10 -o /etc/systemd/system/seconddns-queued.service "$COMMON_URL/seconddns-queued.service?t=$(date +%s)"
 chmod +x /usr/local/bin/seconddns /usr/local/bin/seconddns-domain /usr/local/bin/seconddns-owner /usr/local/bin/seconddns-migrate-master /usr/local/bin/seconddns-reconcile /usr/local/bin/seconddns-queue /usr/local/bin/seconddns-queued
 curl -sf --max-time 10 -o /usr/local/bin/seconddns-tsig "$COMMON_URL/seconddns-tsig?t=$(date +%s)" && chmod +x /usr/local/bin/seconddns-tsig
+curl -sf --max-time 10 -o /usr/local/bin/seconddns_bind.py "$COMMON_URL/seconddns_bind.py?t=$(date +%s)"
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-idn2.sh?t=$(date +%s)")
 mkdir -p /var/lib/seconddns
 bash <(curl -sf --max-time 10 "$COMMON_URL/install-sqlite.sh?t=$(date +%s)")
@@ -558,6 +561,11 @@ if [ -n "$API_NS" ]; then
     fi
 fi
 
+
+echo ""
+# before the initial sync, so zones are created with the key when one is chosen
+SECONDDNS_AUTO_YES="$AUTO_YES" /usr/local/bin/seconddns-tsig setup ${TSIG:+--tsig="$TSIG"} || \
+    echo "[!] TSIG not enabled; zone transfers stay by IP. Later: seconddns-tsig enable --tsig=[ALG:]KEY:SECRET"
 
 echo ""
 # reconcile already knows where each panel keeps its zone list; --add-missing
