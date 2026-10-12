@@ -26,6 +26,7 @@ for arg in "$@"; do
         --api-url=*) API_URL="${arg#*=}" ;;
         --master-ip=*) MASTER_IP="${arg#*=}" ;;
         --yes|-y) AUTO_YES=1 ;;
+        --tsig=*) TSIG="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 --api-key=KEY [--api-url=URL] [--master-ip=IP] [--yes]"
             echo ""
@@ -33,6 +34,7 @@ for arg in "$@"; do
             echo "  --api-url=URL     API base URL (default: https://seconddns.com)"
             echo "  --master-ip=IP    Primary DNS server IP (default: auto-detect)"
             echo "  --yes             Skip confirmation prompts"
+            echo "  --tsig=[ALG:]KEY:SECRET  Zone transfers by TSIG key instead of our IP"
             exit 0
             ;;
     esac
@@ -422,6 +424,11 @@ else
     echo ""
     echo -e "    \033[1;33mThen click Apply.\033[0m"
 fi
+
+echo ""
+# before the initial sync, so zones are created with the key when one is chosen
+SECONDDNS_AUTO_YES="$AUTO_YES" /usr/local/bin/seconddns-tsig setup ${TSIG:+--tsig="$TSIG"} || \
+    echo "[!] TSIG not enabled; zone transfers stay by IP. Later: seconddns-tsig enable --tsig=[ALG:]KEY:SECRET"
 
 echo ""
 # reconcile already knows where each panel keeps its zone list; --add-missing

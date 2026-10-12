@@ -86,6 +86,26 @@ also-notify { SECONDARY_IP; };
 
 The uninstaller does not remove the addresses from the Transfer Restrictions Template (`server_dns` has no command for it): remove them there by hand.
 
+## TSIG-signed transfers
+
+Instead of our IP address, zone transfers can be authenticated with a TSIG key. Create the key in the SecondDNS dashboard (**Settings → DNS**), then either answer **2** at the installer prompt or pass it directly:
+
+```bash
+install.sh --api-key=YOUR_API_KEY --tsig=KEY:SECRET          # KEY = label or full name
+seconddns-tsig enable --tsig=KEY:SECRET                       # on an existing install
+```
+
+What `seconddns-tsig enable` does on Plesk:
+
+1. Writes the key to `/var/named/chroot/etc/seconddns-tsig.key` (0640, named's group) and includes it as `/etc/seconddns-tsig.key` in the custom directives block of `named.conf`, which Plesk keeps.
+2. Adds `key "<name>";` to `acl common-allow-transfer`, the list every Plesk zone uses, next to our IPs.
+3. Sets the key on this server's zones in SecondDNS. Only then our IPs leave the ACL, so no transfer is ever refused.
+4. Installs `seconddns-tsig-restore.path` (watches `named.conf`) and `seconddns-tsig-restore.timer` (every 5 minutes).
+
+Plesk rewrites `acl common-allow-transfer` from the Transfer Restrictions Template whenever it rebuilds the DNS configuration. That drops the key and brings our IPs back. The path unit runs `seconddns-tsig restore` within seconds and puts it right; in between, transfers still work, by IP. To keep our IPs out of the template for good, remove them in **Tools & Settings → DNS Settings → Transfer Restrictions Template**.
+
+`seconddns-tsig status` shows the key in use; `seconddns-tsig disable --zones` goes back to transfers by IP (the uninstaller runs it first).
+
 ## DNS Template
 
 The installer automatically:
