@@ -121,8 +121,8 @@ def our_ips(cfg):
     return [x.strip() for x in str(info.get("dnsIps", "")).split(",") if x.strip()]
 
 
-def checkconf_ok():
-    cmd = shlex.split(os.environ.get("SECONDDNS_NAMED_CHECKCONF", "named-checkconf"))
+def checkconf_ok(args=()):
+    cmd = shlex.split(os.environ.get("SECONDDNS_NAMED_CHECKCONF", "named-checkconf")) + list(args)
     try:
         return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -174,7 +174,7 @@ def write_key_file(path, key, secret):
     os.replace(tmp, path)
 
 
-def edit_named(options, change):
+def edit_named(options, change, check_args=()):
     """Apply change(text) -> (text, error) to the options file; keep it only when
     named-checkconf accepts the result, then reload."""
     with open(options) as f:
@@ -188,7 +188,7 @@ def edit_named(options, change):
     shutil.copy2(options, backup)
     with open(options, "w") as f:
         f.write(after)
-    if not checkconf_ok():
+    if not checkconf_ok(check_args):
         shutil.copy2(backup, options)
         sys.exit(f"{options}: named-checkconf rejected the change; restored from {backup}")
     # named-checkconf does not read key files the way named does: a reload that fails
@@ -210,10 +210,15 @@ class Target:
 
     def __init__(self, conf, flavor):
         self.conf, self.flavor = conf, flavor
+        self.check_args = ()
         if flavor == "plesk":
             chroot = os.environ.get("SECONDDNS_PLESK_CHROOT", "/var/named/chroot")
             self.key_file = os.path.join(chroot or os.path.dirname(conf), "etc" if chroot else "", bind.KEY_FILE_NAME)
             self.include_path = self.key_file[len(chroot):] if chroot else self.key_file
+            if chroot and conf.startswith(chroot.rstrip("/") + "/"):
+                # named runs with -t <chroot>: the include names the key as named sees it,
+                # so the check has to resolve paths inside the chroot too
+                self.check_args = ("-t", chroot, conf[len(chroot.rstrip("/")):])
         else:
             self.key_file = os.path.join(os.path.dirname(conf), bind.KEY_FILE_NAME)
             self.include_path = self.key_file
@@ -253,6 +258,10 @@ def detect_target():
     return Target(options, "bind") if options else None
 
 
+def edit_named_t(t, change):
+    return edit_named(t.conf, change, t.check_args)
+
+
 def chain(*steps):
     """Compose (text) -> (text, error) steps into one change for edit_named."""
     def run(text):
@@ -269,7 +278,7 @@ def add_key_to_bind(key, secret, t):
     existed = os.path.exists(t.key_file)
     write_key_file(t.key_file, key, secret)
     try:
-        edit_named(t.conf, chain(t.with_include, lambda x: t.edit(x, add=[bind.key_entry(key["name"])])))
+        edit_named_t(t, chain(t.with_include, lambda x: t.edit(x, add=[bind.key_entry(key["name"])])))
     except SystemExit:
         if not existed:
             os.remove(t.key_file)
@@ -282,12 +291,12 @@ def drop_ips_from_bind(ips, t):
     with open(t.conf) as fh:
         before = t.entries(fh.read())
     removed = [x for x in before if x.strip('"') in set(ips)]
-    edit_named(t.conf, lambda x: t.edit(x, drop=ips))
+    edit_named_t(t, lambda x: t.edit(x, drop=ips))
     return removed
 
 
 def ips_back_to_bind(entries, t):
-    edit_named(t.conf, lambda x: t.edit(x, add=list(entries)))
+    edit_named_t(t, lambda x: t.edit(x, add=list(entries)))
 
 
 def add_section_value(config, name, value):
@@ -298,7 +307,7 @@ def add_section_value(config, name, value):
 
 
 def remove_key_from_bind(key_name, t):
-    edit_named(t.conf, chain(lambda x: (t.without_include(x), None), lambda x: t.edit(x, drop=[bind.key_entry(key_name)])))
+    edit_named_t(t, chain(lambda x: (t.without_include(x), None), lambda x: t.edit(x, drop=[bind.key_entry(key_name)])))
     if os.path.exists(t.key_file):
         os.remove(t.key_file)
 

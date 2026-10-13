@@ -102,7 +102,7 @@ What `seconddns-tsig enable` does on Plesk:
 3. Sets the key on this server's zones in SecondDNS. Only then our IPs leave the ACL, so no transfer is ever refused.
 4. Installs `seconddns-tsig-restore.path` (watches `named.conf`) and `seconddns-tsig-restore.timer` (every 5 minutes).
 
-Plesk rewrites `acl common-allow-transfer` from the Transfer Restrictions Template whenever it rebuilds the DNS configuration. That drops the key and brings our IPs back. The path unit runs `seconddns-tsig restore` within seconds and puts it right; in between, transfers still work, by IP. To keep our IPs out of the template for good, remove them in **Tools & Settings → DNS Settings → Transfer Restrictions Template**.
+Plesk rewrites `acl common-allow-transfer` from the Transfer Restrictions Template whenever it rebuilds the DNS configuration. That drops the key from the ACL and brings our IPs back. The path unit runs `seconddns-tsig restore` within seconds and puts it right. In between, SecondDNS's signed requests still pass: named keeps knowing the key through the include in the custom directives block, and our IP is back in the ACL. If Plesk ever rewrites the custom block as well, named no longer knows the key and signed transfers are refused (BADKEY) until `restore` runs; the secondary retries on its schedule. To keep our IPs out of the template for good, remove them in **Tools & Settings → DNS Settings → Transfer Restrictions Template**.
 
 `seconddns-tsig status` shows the key in use; `seconddns-tsig disable --zones` goes back to transfers by IP (the uninstaller runs it first).
 

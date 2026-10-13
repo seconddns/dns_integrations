@@ -121,19 +121,36 @@ transfers 127.0.0.1 && fail "our IP still transfers without the key" || ok "our 
 transfers 127.0.0.1 "$KEY" && ok "our IP with the key transfers" || fail "signed AXFR failed"
 transfers 127.0.0.2 && ok "the customer's other secondary still transfers by IP" || fail "customer's secondary lost access"
 
-echo "== 2. Plesk rewrites named.conf, then restore"
-python3 - "$CONF" "$template_acl" <<'PY'
+echo "== 2. Plesk rewrites the ACL (custom block kept), then restore"
+rewrite_acl() {
+    python3 - "$CONF" "$template_acl" <<'PY'
 import re, sys
 p, acl = sys.argv[1], sys.argv[2]; s = open(p).read()
 open(p, "w").write(re.sub(r"acl common-allow-transfer \{.*?\};", acl, s, flags=re.S))
 PY
-kill -HUP "$(cat "$TMP/named.pid")"; sleep 1
-transfers 127.0.0.1 && ok "right after the rewrite our IP is open again (the window)" || fail "rewrite simulation did not reopen our IP"
+    kill -HUP "$(cat "$TMP/named.pid")"; sleep 1
+}
+rewrite_acl
+# SecondDNS signs every request for a zone with a key; named still knows the key through
+# the include in the custom block, and the template ACL lets our IP in
+transfers 127.0.0.1 "$KEY" && ok "signed AXFR still passes in the window (key known, IP back in the ACL)" || fail "signed AXFR refused after an ACL-only rewrite"
+transfers 127.0.0.1 && ok "unsigned from our IP is open in the window" || fail "rewrite simulation did not reopen our IP"
 "$TSIG" restore > "$TMP/out" 2>&1 || fail "restore: $(cat "$TMP/out")"
 transfers 127.0.0.1 && fail "restore left our IP open" || ok "after restore our IP needs the key again"
 transfers 127.0.0.1 "$KEY" && ok "signed AXFR works after restore" || fail "signed AXFR failed after restore"
 
-echo "== 3. disable --zones"
+echo "== 3. a rewrite that also drops the include: signed AXFR refused until restore"
+rewrite_acl
+python3 - "$CONF" <<'PY'
+import sys; p=sys.argv[1]; s=open(p).read()
+open(p,"w").write("".join(l for l in s.splitlines(True) if "seconddns-tsig" not in l))
+PY
+kill -HUP "$(cat "$TMP/named.pid")"; sleep 1
+transfers 127.0.0.1 "$KEY" && fail "signed AXFR passed with the key unknown to named" || ok "signed AXFR refused while named does not know the key (BADKEY)"
+"$TSIG" restore > "$TMP/out" 2>&1 || fail "restore: $(cat "$TMP/out")"
+transfers 127.0.0.1 "$KEY" && ok "signed AXFR works again after restore" || fail "signed AXFR still refused after restore"
+
+echo "== 4. disable --zones"
 "$TSIG" disable --zones > "$TMP/out" 2>&1 || fail "disable: $(cat "$TMP/out")"
 transfers 127.0.0.1 && ok "our IP transfers without a key again" || fail "our IP refused after disable"
 

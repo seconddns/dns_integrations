@@ -25,7 +25,7 @@ export SECONDDNS_PLESK_CHROOT="$CHROOT"
 export SECONDDNS_NAMED_OPTIONS="$CONF"
 export SECONDDNS_CONF="$TMP/seconddns.conf"
 export SECONDDNS_TSIG_SECRET="$TMP/etc-seconddns/tsig.secret"
-export SECONDDNS_NAMED_CHECKCONF="sh -c 'test ! -e $TMP/checkconf-fails'"
+export SECONDDNS_NAMED_CHECKCONF="sh -c 'echo \"\$*\" >> $TMP/checkconf.log; test ! -e $TMP/checkconf-fails' checkconf"
 export SECONDDNS_NAMED_RELOAD="true"
 export SECONDDNS_NAMED_GID="$(id -g)"
 export SECONDDNS_QUEUED_RESTART="true"
@@ -49,7 +49,7 @@ PY
 }
 
 reset() {
-    rm -rf "$CHROOT" "$TMP/systemd" "$TMP/systemctl.log" "$TMP/checkconf-fails" "$SECONDDNS_TSIG_SECRET"
+    rm -rf "$CHROOT" "$TMP/systemd" "$TMP/systemctl.log" "$TMP/checkconf.log" "$TMP/checkconf-fails" "$SECONDDNS_TSIG_SECRET"
     mkdir -p "$CHROOT/etc" "$TMP/systemd"
     cp "$FIXTURE" "$CONF"
     : > "$TMP/patches.log"
@@ -97,6 +97,7 @@ echo "== 1. enable --zones on a Plesk named.conf"
 reset
 "$TSIG" enable --tsig="web:$SECRET" --zones > "$TMP/out" 2>&1; rc=$?
 assert_eq "$rc" 0 "enable exits 0"
+assert_eq "$(sort -u "$TMP/checkconf.log")" "-t $CHROOT /etc/named.conf" "named-checkconf runs inside the chroot, where the include resolves"
 [ -e "$KEYFILE" ] && grep -q "secret \"$SECRET\";" "$KEYFILE" && ok "key file inside the chroot" || fail "key file missing in $CHROOT/etc"
 awk '/PLEASE ADD YOUR CUSTOM DIRECTIVES/{getline; print; exit}' "$CONF" | grep -q '^include "/etc/seconddns-tsig.key"; // seconddns-tsig$' \
     && ok "include right below the custom directives line, chroot path" || fail "include: $(grep -n seconddns-tsig "$CONF")"
