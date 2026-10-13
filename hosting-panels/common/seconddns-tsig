@@ -21,7 +21,8 @@
   seconddns-tsig disable [--zones|--no-zones]      undo enable: our IP back in allow-transfer,
                                                   key removed, zones back to unsigned
   seconddns-tsig restore                           put the key back on BIND if the panel rewrote
-                                                  its configuration (quiet when nothing is missing)
+                                                  its configuration (quiet when nothing is missing);
+                                                  on Plesk a systemd path unit runs it after each rewrite
   seconddns-tsig setup [--tsig=…]                  installer step: with --tsig, enable; on a terminal,
                                                   ask whether transfers go by our IP or by a TSIG key;
                                                   otherwise keep our IP
@@ -120,8 +121,8 @@ def our_ips(cfg):
     return [x.strip() for x in str(info.get("dnsIps", "")).split(",") if x.strip()]
 
 
-def checkconf_ok():
-    cmd = shlex.split(os.environ.get("SECONDDNS_NAMED_CHECKCONF", "named-checkconf"))
+def checkconf_ok(args=()):
+    cmd = shlex.split(os.environ.get("SECONDDNS_NAMED_CHECKCONF", "named-checkconf")) + list(args)
     try:
         return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -173,7 +174,7 @@ def write_key_file(path, key, secret):
     os.replace(tmp, path)
 
 
-def edit_named(options, change):
+def edit_named(options, change, check_args=()):
     """Apply change(text) -> (text, error) to the options file; keep it only when
     named-checkconf accepts the result, then reload."""
     with open(options) as f:
@@ -187,7 +188,7 @@ def edit_named(options, change):
     shutil.copy2(options, backup)
     with open(options, "w") as f:
         f.write(after)
-    if not checkconf_ok():
+    if not checkconf_ok(check_args):
         shutil.copy2(backup, options)
         sys.exit(f"{options}: named-checkconf rejected the change; restored from {backup}")
     # named-checkconf does not read key files the way named does: a reload that fails
@@ -199,35 +200,103 @@ def edit_named(options, change):
     return True
 
 
-def key_file_for(options):
-    return os.path.join(os.path.dirname(options), bind.KEY_FILE_NAME)
+class Target:
+    """Where the key lives and which list lets transfers in.
+
+    bind:  allow-transfer in the options block, include appended to the options file.
+    plesk: every zone has allow-transfer { common-allow-transfer; }, so the list is that
+           ACL; the include goes into Plesk's custom directives block (kept on rewrite);
+           named runs chrooted, so the include names the key file as named sees it."""
+
+    def __init__(self, conf, flavor):
+        self.conf, self.flavor = conf, flavor
+        self.check_args = ()
+        if flavor == "plesk":
+            chroot = os.environ.get("SECONDDNS_PLESK_CHROOT", "/var/named/chroot")
+            self.key_file = os.path.join(chroot or os.path.dirname(conf), "etc" if chroot else "", bind.KEY_FILE_NAME)
+            self.include_path = self.key_file[len(chroot):] if chroot else self.key_file
+            if chroot and conf.startswith(chroot.rstrip("/") + "/"):
+                # named runs with -t <chroot>: the include names the key as named sees it,
+                # so the check has to resolve paths inside the chroot too
+                self.check_args = ("-t", chroot, conf[len(chroot.rstrip("/")):])
+        else:
+            self.key_file = os.path.join(os.path.dirname(conf), bind.KEY_FILE_NAME)
+            self.include_path = self.key_file
+        self.where = f"acl {bind.PLESK_ACL}" if flavor == "plesk" else "allow-transfer"
+
+    def edit(self, text, add=(), drop=()):
+        return (bind.edit_acl if self.flavor == "plesk" else bind.edit_allow_transfer)(text, add=add, drop=drop)
+
+    def entries(self, text):
+        return (bind.acl_entries if self.flavor == "plesk" else bind.allow_transfer_entries)(text)
+
+    def with_include(self, text):
+        if self.flavor == "plesk":
+            return bind.add_include_custom(text, self.include_path)
+        return bind.add_include(text, self.include_path), None
+
+    def without_include(self, text):
+        return bind.remove_include(text, self.include_path)
+
+    def complete(self, text, key_name, dropped):
+        """Key file, include and key in the list, and none of the dropped entries back."""
+        return (os.path.exists(self.key_file)
+                and bind.include_line(self.include_path).strip() in text
+                and bind.key_entry(key_name) in self.entries(text)
+                and not any(x in self.entries(text) for x in dropped))
 
 
-def add_key_to_bind(key, secret, options):
-    """Key file, include, and the key added to allow-transfer next to whatever is there."""
-    key_file = key_file_for(options)
-    existed = os.path.exists(key_file)
-    write_key_file(key_file, key, secret)
+def detect_target():
+    flavor = os.environ.get("SECONDDNS_TSIG_FLAVOR") or ("plesk" if shutil.which("plesk") and os.path.isdir("/usr/local/psa") else "bind")
+    if flavor == "plesk":
+        forced = os.environ.get("SECONDDNS_NAMED_OPTIONS")
+        conf = forced if forced else os.path.realpath("/etc/named.conf")
+        if not os.path.isfile(conf) or (not forced and subprocess.run(["pgrep", "-x", "named"], capture_output=True).returncode != 0):
+            return None
+        return Target(conf, "plesk")
+    options = named_options()
+    return Target(options, "bind") if options else None
+
+
+def edit_named_t(t, change):
+    return edit_named(t.conf, change, t.check_args)
+
+
+def chain(*steps):
+    """Compose (text) -> (text, error) steps into one change for edit_named."""
+    def run(text):
+        for step in steps:
+            text, err = step(text)
+            if err:
+                return text, err
+        return text, None
+    return run
+
+
+def add_key_to_bind(key, secret, t):
+    """Key file, include, and the key added to the list next to whatever is there."""
+    existed = os.path.exists(t.key_file)
+    write_key_file(t.key_file, key, secret)
     try:
-        edit_named(options, lambda t: bind.edit_allow_transfer(bind.add_include(t, key_file), add=[bind.key_entry(key["name"])]))
+        edit_named_t(t, chain(t.with_include, lambda x: t.edit(x, add=[bind.key_entry(key["name"])])))
     except SystemExit:
         if not existed:
-            os.remove(key_file)
+            os.remove(t.key_file)
         raise
-    return key_file
+    return t.key_file
 
 
-def drop_ips_from_bind(ips, options):
-    """Remove our IPs from allow-transfer; returns the entries actually removed, as written."""
-    with open(options) as fh:
-        before = bind.allow_transfer_entries(fh.read())
+def drop_ips_from_bind(ips, t):
+    """Remove our IPs from the list; returns the entries actually removed, as written."""
+    with open(t.conf) as fh:
+        before = t.entries(fh.read())
     removed = [x for x in before if x.strip('"') in set(ips)]
-    edit_named(options, lambda t: bind.edit_allow_transfer(t, drop=ips))
+    edit_named_t(t, lambda x: t.edit(x, drop=ips))
     return removed
 
 
-def ips_back_to_bind(entries, options):
-    edit_named(options, lambda t: bind.edit_allow_transfer(t, add=list(entries)))
+def ips_back_to_bind(entries, t):
+    edit_named_t(t, lambda x: t.edit(x, add=list(entries)))
 
 
 def add_section_value(config, name, value):
@@ -237,11 +306,45 @@ def add_section_value(config, name, value):
     write_section(config, body + f"{name} = {value}\n")
 
 
-def remove_key_from_bind(key_name, options):
-    key_file = key_file_for(options)
-    edit_named(options, lambda t: bind.edit_allow_transfer(bind.remove_include(t, key_file), drop=[bind.key_entry(key_name)]))
-    if os.path.exists(key_file):
-        os.remove(key_file)
+def remove_key_from_bind(key_name, t):
+    edit_named_t(t, chain(lambda x: (t.without_include(x), None), lambda x: t.edit(x, drop=[bind.key_entry(key_name)])))
+    if os.path.exists(t.key_file):
+        os.remove(t.key_file)
+
+
+# Plesk rewrites named.conf from its database (ACL without our key); restore puts the key
+# back within seconds of any rewrite, the timer is the fallback.
+SYSTEMD_DIR = os.environ.get("SECONDDNS_SYSTEMD_DIR", "/etc/systemd/system")
+UNITS = {
+    "seconddns-tsig-restore.service": "[Unit]\nDescription=SecondDNS: put the TSIG key back into named.conf\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/seconddns-tsig restore\n",
+    "seconddns-tsig-restore.path": "[Unit]\nDescription=SecondDNS: watch named.conf for Plesk rewrites\n\n[Path]\nPathChanged={conf}\nUnit=seconddns-tsig-restore.service\n\n[Install]\nWantedBy=multi-user.target\n",
+    "seconddns-tsig-restore.timer": "[Unit]\nDescription=SecondDNS: periodic TSIG key check\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=5min\nUnit=seconddns-tsig-restore.service\n\n[Install]\nWantedBy=timers.target\n",
+}
+
+
+def systemctl(*args):
+    cmd = shlex.split(os.environ.get("SECONDDNS_SYSTEMCTL", "systemctl")) + list(args)
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def install_restore_units(conf):
+    for name, body in UNITS.items():
+        with open(os.path.join(SYSTEMD_DIR, name), "w") as f:
+            f.write(body.replace("{conf}", conf))
+    systemctl("daemon-reload")
+    systemctl("enable", "--now", "seconddns-tsig-restore.path", "seconddns-tsig-restore.timer")
+
+
+def remove_restore_units():
+    systemctl("disable", "--now", "seconddns-tsig-restore.path", "seconddns-tsig-restore.timer")
+    for name in UNITS:
+        path = os.path.join(SYSTEMD_DIR, name)
+        if os.path.exists(path):
+            os.remove(path)
+    systemctl("daemon-reload")
 
 
 def restart_worker():
@@ -328,7 +431,7 @@ def main():
     a = ap.parse_args()
 
     if a.cmd == "setup":
-        if not named_options():
+        if not detect_target():
             if a.tsig:
                 sys.exit("--tsig: BIND (named) is not running here; TSIG for PowerDNS panels is not supported yet")
             return
@@ -348,8 +451,8 @@ def main():
         a.cmd, a.tsig, a.zones = "enable", pair, True
 
     if a.cmd in ("enable", "disable", "restore"):
-        options = named_options()
-        if not options:
+        t = detect_target()
+        if not t:
             sys.exit("BIND (named) is not running here; TSIG for PowerDNS panels is not supported yet")
         cfg = load_config(a.config)
         cp = configparser.ConfigParser()
@@ -358,58 +461,68 @@ def main():
             # 1. key accepted next to our IPs, 2. zones switch to the key, 3. only then our
             # IPs go: an unsigned request from a zone not yet switched is never refused
             key, secret = resolve_pair(a.config, a.tsig)
-            key_file = add_key_to_bind(key, secret, options)
+            key_file = add_key_to_bind(key, secret, t)
             store(a.config, key, secret)
             restart_worker()
-            print(f"[+] TSIG key {key['name']} installed: {key_file}, accepted in allow-transfer of {options}")
-            with open(options) as fh:
-                zl = bind.zone_level_transfers(fh.read(), our_ips(cfg))
-            if zl:
-                print(f"[!] {zl} zone-level allow-transfer entr{'y' if zl == 1 else 'ies'} name our IP and override options.")
-                print(f"    In WHM > Service Configuration > DNS Server (BIND) > Additional zone configuration,")
-                print(f"    replace our IP with:  allow-transfer {{ key \"{key['name']}\"; }};")
+            print(f"[+] TSIG key {key['name']} installed: {key_file}, accepted in {t.where} of {t.conf}")
+            if t.flavor == "bind":
+                with open(t.conf) as fh:
+                    zl = bind.zone_level_transfers(fh.read(), our_ips(cfg))
+                if zl:
+                    print(f"[!] {zl} zone-level allow-transfer entr{'y' if zl == 1 else 'ies'} name our IP and override options.")
+                    print(f"    In WHM > Service Configuration > DNS Server (BIND) > Additional zone configuration,")
+                    print(f"    replace our IP with:  allow-transfer {{ key \"{key['name']}\"; }};")
             if set_zone_keys(cfg, this_servers_zones(cfg), key["id"], a.zones, "Set the key"):
-                removed = drop_ips_from_bind(our_ips(cfg), options)
+                removed = drop_ips_from_bind(our_ips(cfg), t)
                 if removed:
                     add_section_value(a.config, "removed_entries", ",".join(removed))
-                print("[+] allow-transfer: our IPs removed, transfers to SecondDNS need the key")
+                print(f"[+] {t.where}: our IPs removed, transfers to SecondDNS need the key")
             else:
-                print("[!] our IPs stay in allow-transfer until every zone has the key: seconddns-tsig enable --tsig=... --zones")
+                print(f"[!] our IPs stay in {t.where} until every zone has the key: seconddns-tsig enable --tsig=... --zones")
+            if t.flavor == "plesk":
+                install_restore_units(t.conf)
+                print("[+] Plesk rewrites named.conf from its own settings; seconddns-tsig-restore.path puts the key back after each rewrite")
         elif a.cmd == "disable":
             if not cp.has_section("tsig"):
                 print("TSIG: already off")
                 return
-            t = cp["tsig"]
-            saved = dict(t)
+            saved = dict(cp["tsig"])
+            if t.flavor == "plesk":
+                remove_restore_units()  # it would put the key back halfway through
             # what enable took out; an install that never dropped anything gets the first IP
             back = [x for x in saved.get("removed_entries", "").split(",") if x] or our_ips(cfg)[:1]
             # mirror of enable: our IPs back, new zones unsigned, zones off the key, key goes
-            ips_back_to_bind(back, options)
+            ips_back_to_bind(back, t)
             write_section(a.config, "")
             restart_worker()
             mine = [z for z in this_servers_zones(cfg) if z.get("tsigKeyId") == saved["key_id"]]
             if not set_zone_keys(cfg, mine, None, a.zones, "Remove the key"):
                 write_section(a.config, "".join(f"{k} = {v}\n" for k, v in saved.items()))
                 restart_worker()
+                if t.flavor == "plesk":
+                    install_restore_units(t.conf)
                 sys.exit("[!] the key stays on BIND while zones still use it: seconddns-tsig disable --zones")
-            remove_key_from_bind(saved["key_name"], options)
+            remove_key_from_bind(saved["key_name"], t)
             f = saved.get("secret_file", "")
             if f and os.path.exists(f):
                 os.remove(f)
-            print(f"[+] TSIG off: our IP is back in allow-transfer in {options}, key removed")
+            print(f"[+] TSIG off: our IP is back in {t.where} of {t.conf}, key removed")
         else:
             if not cp.has_section("tsig"):
                 return
-            t = cp["tsig"]
-            key_file = key_file_for(options)
-            with open(options) as fh:
+            saved = cp["tsig"]
+            dropped = [x for x in saved.get("removed_entries", "").split(",") if x]
+            with open(t.conf) as fh:
                 text = fh.read()
-            if os.path.exists(key_file) and bind.include_line(key_file).strip() in text and bind.has_key_in_allow_transfer(text, t["key_name"]):
+            if t.complete(text, saved["key_name"], dropped):
                 return
-            with open(t["secret_file"]) as fh:
+            with open(saved["secret_file"]) as fh:
                 secret = fh.read().strip()
-            add_key_to_bind({"id": t["key_id"], "name": t["key_name"], "algorithm": t["algorithm"]}, secret, options)
-            print(f"[+] TSIG key {t['key_name']} restored in {options}")
+            add_key_to_bind({"id": saved["key_id"], "name": saved["key_name"], "algorithm": saved["algorithm"]}, secret, t)
+            if dropped:
+                # Plesk puts the template's IPs back on every rewrite; keep transfers key-only
+                drop_ips_from_bind([x.strip('"') for x in dropped], t)
+            print(f"[+] TSIG key {saved['key_name']} restored in {t.conf}")
         return
 
     if a.cmd == "check-secret":

@@ -67,21 +67,10 @@ def key_block(name, algorithm, secret):
     return f'key "{name}" {{\n    algorithm {algorithm};\n    secret "{secret}";\n}};\n'
 
 
-def edit_allow_transfer(text, add=(), drop=()):
-    """allow-transfer in the options block: remove the entries in drop (and a "none"
-    placeholder once something real is added), append the entries in add that are
-    missing. Other entries and comments stay where they are. Returns (new_text, error)."""
-    mask = _code_mask(text)
-    span = _options_span(text, mask)
-    if not span:
-        return text, "no options { } block"
-    s, e = span
-    m = re.search(r"\ballow-transfer\s*\{([^{}]*)\}\s*;", mask[s:e])
-    if not m:
-        if not add:
-            return text, None
-        return text[:e] + "    allow-transfer { " + "; ".join(add) + "; };\n" + text[e:], None
-    a, b = s + m.start(1), s + m.end(1)
+def _edit_list(text, mask, a, b, add, drop, none_literal):
+    """Edit the entries between a and b (the inside of a { ... } list): remove those in
+    drop (and a none placeholder once something real is added), append those in add
+    that are missing. Other entries and comments stay where they are."""
     body, body_mask = text[a:b], mask[a:b]
     values = _code_mask(text, keep_strings=True)[a:b]
     # entries end at ';' in real config; text in between (comments, spacing) is kept
@@ -98,7 +87,7 @@ def edit_allow_transfer(text, add=(), drop=()):
         gone.add("none")
     kept = "".join(body[p:q] for p, q, v in entries if v.strip('"') not in gone)
     if not kept.strip() and not added:
-        new = ' "none"; '
+        new = f" {none_literal}; "
     elif "\n" in body:
         # one entry per line: new ones go on their own lines, after a trailing comment
         indent = next((ln[:len(ln) - len(ln.lstrip())] for ln in body.splitlines() if ln.strip()), "    ")
@@ -106,7 +95,22 @@ def edit_allow_transfer(text, add=(), drop=()):
         new = kept + first + "".join(f"\n{indent}{x};" for x in added) + (nl + rest if nl else "\n")
     else:
         new = " " + " ".join(part for part in [kept.strip(), " ".join(f"{x};" for x in added)] if part) + " "
-    return text[:a] + new + text[b:], None
+    return text[:a] + new + text[b:]
+
+
+def edit_allow_transfer(text, add=(), drop=()):
+    """allow-transfer in the options block, edited with _edit_list. Returns (new_text, error)."""
+    mask = _code_mask(text)
+    span = _options_span(text, mask)
+    if not span:
+        return text, "no options { } block"
+    s, e = span
+    m = re.search(r"\ballow-transfer\s*\{([^{}]*)\}\s*;", mask[s:e])
+    if not m:
+        if not add:
+            return text, None
+        return text[:e] + "    allow-transfer { " + "; ".join(add) + "; };\n" + text[e:], None
+    return _edit_list(text, mask, s + m.start(1), s + m.end(1), add, drop, '"none"'), None
 
 
 def key_entry(name):
@@ -164,3 +168,49 @@ def allow_transfer_entries(text):
         return []
     values = _code_mask(text, keep_strings=True)[s + m.start(1):s + m.end(1)]
     return [x.strip() for x in values.split(";") if x.strip()]
+
+
+# --- Plesk: zones carry allow-transfer { common-allow-transfer; } ---------------------
+
+PLESK_ACL = "common-allow-transfer"
+PLESK_CUSTOM_MARK = "PLEASE ADD YOUR CUSTOM DIRECTIVES BELOW THIS LINE"
+
+
+def _acl_body(text, mask):
+    m = re.search(r"\bacl\s+" + re.escape(PLESK_ACL) + r"\s*\{([^{}]*)\}\s*;", mask)
+    return (m.start(1), m.end(1)) if m else None
+
+
+def edit_acl(text, add=(), drop=()):
+    """acl common-allow-transfer, which Plesk includes in every zone. Returns (new_text, error)."""
+    mask = _code_mask(text)
+    span = _acl_body(text, mask)
+    if not span:
+        return text, f"no acl {PLESK_ACL} {{ }} block"
+    return _edit_list(text, mask, span[0], span[1], add, drop, "none"), None
+
+
+def acl_entries(text):
+    mask = _code_mask(text)
+    span = _acl_body(text, mask)
+    if not span:
+        return []
+    values = _code_mask(text, keep_strings=True)[span[0]:span[1]]
+    return [x.strip() for x in values.split(";") if x.strip()]
+
+
+def add_include_custom(text, key_file):
+    """The include goes into Plesk's custom directives block, which Plesk keeps when it
+    rewrites named.conf. Returns (new_text, error)."""
+    line = include_line(key_file)
+    if line.strip() in text:
+        return text, None
+    out, done = [], False
+    for ln in text.splitlines(True):
+        out.append(ln)
+        if not done and PLESK_CUSTOM_MARK in ln:
+            out.append(line)
+            done = True
+    if not done:
+        return text, f"no \"{PLESK_CUSTOM_MARK}\" line in named.conf"
+    return "".join(out), None

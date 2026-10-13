@@ -60,6 +60,25 @@ jobs:
       - name: test_plesk_acl.sh
         run: bash hosting-panels/common/tests/test_plesk_acl.sh
 
+      - name: test_tsig_plesk.sh
+        run: bash hosting-panels/common/tests/test_tsig_plesk.sh
+
+      # needs the bind9 installed above
+      - name: test_tsig_plesk_named.sh
+        run: |
+          out=$(bash hosting-panels/common/tests/test_tsig_plesk_named.sh); rc=$?
+          echo "$out"
+          echo "$out" | grep -q '^skipped' && { echo "::error::BIND missing on the runner"; exit 1; }
+          exit $rc
+
+      # named-checkconf -t needs root (chroot)
+      - name: test_tsig_plesk_chroot.sh
+        run: |
+          out=$(sudo bash hosting-panels/common/tests/test_tsig_plesk_chroot.sh); rc=$?
+          echo "$out"
+          echo "$out" | grep -q '^skipped' && { echo "::error::test skipped on the runner"; exit 1; }
+          exit $rc
+
       # needs the bind9 installed by the step above
       - name: test_plesk_acl_named.sh
         run: |
